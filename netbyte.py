@@ -1,6 +1,7 @@
 # import time
 import struct
 import math
+import sys
 import importlib
 
 from functools import reduce
@@ -306,7 +307,11 @@ class Instruction(object):
             self.environment.execute(open(self.arguments[0], 'rb').read())
                         
         elif self.opcode == "PRINTV":
-            print(*arguments)
+            if self.environment.pstream is sys.stdout or self.environment.pstream is sys.stderr:
+                self.environment.pstream.write(" ".join(tuple(map(str, arguments))) + "\n")
+            
+            else:
+                self.environment.pstream.write(bytes(" ".join(tuple(map(str, arguments))), 'utf-8') + b"\n")
             
         elif self.opcode == "NULLEV":
             return # we already evaluated the arguments anyway :P
@@ -315,11 +320,12 @@ class Instruction(object):
         return self
         
 class Netbyte(object):
-    def __init__(self):
+    def __init__(self, print_stream=sys.stdout):
         self.variables = {}
         self.functions = {}
         self.return_stack = {}
         self.files = []
+        self.pstream = print_stream
         self.last_return = None
         
     def _get_str(self, data, pos):

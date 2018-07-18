@@ -40,7 +40,8 @@ EXPR_OPCODES = [
     "GETVAR", # Retrieve Variable : string name, string scope -> any
     "VTOSTR", # String Conversion : any -> string
     "GETARG", # Get function Argument from index : int -> any
-
+    "REPEAT", # Repeat expression multiple times (for function calls)
+    
     # Comparison Operators
     "EQUALS", # Equation : 2+ any -> bool
     "DIFFER", # Differentiation : 2+ any -> bool
@@ -89,7 +90,16 @@ class Operation(Expression):
         return self.operator, tuple(map(dbgvalue, self.operands))
         
     def __value__(self):
+        if self.operator == "REPEAT":
+            res = None
+        
+            for _ in range(exvalue(self.operands[0])):
+                res = exvalue(self.operands[1])
+                
+            return res
+            
         operands = tuple(map(exvalue, self.operands))
+        
         # print(self.operator, "has operands", operands, "derived from", tuple(map(dbgvalue, self.operands)))
     
         if self.operator == "VTOSTR":
@@ -507,7 +517,7 @@ class Netbyte(object):
                 res += r
                 
             elif type(exp.value) is int:
-                elif exp.value > 2147483647:
+                if exp.value > 2147483647:
                     f = 'q'
                 
                 elif exp.value > 32767:

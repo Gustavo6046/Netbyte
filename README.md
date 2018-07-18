@@ -7,9 +7,8 @@ For a demonstration of its capabilities, run:
 
     python main.py test.nbe
     
-Such will run the bytecode file `test.nbe`, which weights just **83 bytes!** In that very space,
-we can print the string "Hello!", the string "1234", and return the integer 30, adding three
-10's Lisp-style.
+Such will run the bytecode file `test.nbe`, which weights just **638 bytes!** In that very space,
+we can print a few strings, and add 500 and 15 to an X variable several times.
 
 And yes, the file has a return value, much like a function!
 

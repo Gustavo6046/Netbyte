@@ -15,9 +15,17 @@ And yes, the file has a return value, much like a function!
 This code is equivalent to the Python:
 
     def main():
-        print("Hello!")
-        print("1234")
-        return 10 + 10 + 10
+        x = 0
+    
+        for _ in range(32):
+            x += 20
+            print("Added 20 to X! X is now {}".format(20, x))
+            
+        for _ in range(5):
+            x += 100
+            print("Added 100 to X! X is now {}".format(20, x))
+            
+        return x
         
     main()
     

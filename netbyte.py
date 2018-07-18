@@ -87,6 +87,12 @@ class Operation(Expression):
         self.scope = scope
         self.function = function
         
+    def __str__(self):
+        return repr(self)
+        
+    def __repr__(self):
+        return "[{} operation with {} operands]".format(self.operator, len(self.operands))
+        
     def __debug_value__(self):
         return self.operator, tuple(map(dbgvalue, self.operands))
         
@@ -171,6 +177,12 @@ class Literal(Expression):
     def __init__(self, environment, value):
         self.environment = environment
         self.value = value
+        
+    def __str__(self):
+        return repr(self)
+        
+    def __repr__(self):
+        return self.value
 
     def __debug_value__(self):
         return self.value
@@ -184,6 +196,12 @@ class FunctionCall(Expression):
         self.scope = scope
         self.name = name
         self.args = args
+        
+    def __str__(self):
+        return repr(self)
+        
+    def __repr__(self):
+        return "[Function call {}::{}({} arguments)]".format(self.scope, self.name, len(self.args))
         
     def __debug_value__(self):
         return "[function {}::{}]".format(self.scope, self.name)
@@ -200,6 +218,12 @@ class Function(object):
         
     def __hash__(self):
         return hash(self.scope.replace(':', '_') + "::" + self.name.replace(':', '_'))
+        
+    def __str__(self):
+        return repr(self)
+        
+    def __repr__(self):
+        return "[Function with {} instructions]".format(len(self.instructions))
         
     def execute(self, *args):
         res = None
@@ -241,6 +265,12 @@ class Instruction(object):
         self.opcode = opcode
         self.arguments = args
         self.function = function
+        
+    def __str__(self):
+        return repr(self)
+        
+    def __repr__(self):
+        return "[{} instruction]".format(self.opcode)
         
     def __debug_value__(self):
         return self.opcode, tuple(map(dbgvalue, self.arguments))
@@ -507,7 +537,7 @@ class Netbyte(object):
             
         elif type(exp) is Operation:
             ores = struct.pack("=B", EXPR_OPCODES.index(exp.operator) + 1)
-            
+
             for o in exp.operands:                    
                 r = self.dump_expression(o, debug=debug, level=level + 1)
                 ores += r

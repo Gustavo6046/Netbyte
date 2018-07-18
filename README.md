@@ -23,7 +23,7 @@ This code is equivalent to the Python:
     main()
     
 And its expression chaining syntax, which makes this so flexible, is inspired by Lisp. See the
-interpreter's code, `interpreter.py`, to learn more about the opcodes (Operation Codes) and
+code, especially that at `netbyte.py`, to learn more about the opcodes (Operation Codes) and
 expcodes (Expression Codes), and all the types too!
 
 No compilers yet.

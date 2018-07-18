@@ -1,9 +1,10 @@
+# import time
 import struct
-import time
 import math
 import importlib
 
-from socket import socket, AF_INET, SOCK_STREAM, error as SocketError
+from functools import reduce
+# from socket import socket, AF_INET, SOCK_STREAM, error as SocketError
 
 # Note that optional arguments default to None (Python) or NULLVL (Netbyte).
 
@@ -19,6 +20,7 @@ BASE_OPCODES = [
     "MLABEL", # Mark Label
     "EXFILE", # Execute File
     "PRINTV", # Print Value
+    "NULLEV", # Null Evaluation: for executing functions without printing their result!
 ]
 
 # Expression Types
@@ -36,6 +38,8 @@ TYPES = [
 EXPR_OPCODES = [
     # Generic Operators
     "GETVAR", # Retrieve Variable : string name, string scope -> any
+    "VTOSTR", # String Conversion : any -> string
+    "GETARG", # Get function Argument from index : int -> any
 
     # Comparison Operators
     "EQUALS", # Equation : 2+ any -> bool
@@ -66,18 +70,30 @@ EXPR_OPCODES = [
 def exvalue(expr, *args, **kwargs):
     return expr.__value__(*args, **kwargs)
         
+def dbgvalue(expr):
+    return expr.__debug_value__()
+        
 class Expression(object):
     def __value__(self):
         raise RuntimeError("Expression objects can't be used directly!")
         
 class Operation(Expression):
-    def __init__(self, environment, operator, *args, scope=None):
+    def __init__(self, environment, operator, *args, scope=None, function=None):
+        self.environment = environment
         self.operator = operator
         self.operands = args
         self.scope = scope
+        self.function = function
+        
+    def __debug_value__(self):
+        return self.operator, tuple(map(dbgvalue, self.operands))
         
     def __value__(self):
-        operands = map(exvalue, self.operands)
+        operands = tuple(map(exvalue, self.operands))
+        # print(self.operator, "has operands", operands, "derived from", tuple(map(dbgvalue, self.operands)))
+    
+        if self.operator == "VTOSTR":
+            return str(operands[0])
     
         if self.operator == "GETVAR":
             return self.environment.variables[operands[1]][operands[0]]
@@ -95,7 +111,7 @@ class Operation(Expression):
             return operands[0] - operands[1]
             
         if self.operator == "MULNUM":
-            return reduce(lambda a, b: a * b, operands, 0)
+            return reduce(lambda a, b: a * b, operands, 1)
             
         if self.operator == "DIVNUM":
             return operands[0] / operands[1]
@@ -107,13 +123,13 @@ class Operation(Expression):
             return math.pow(operands[0], 1.0 / operands[1])
             
         if self.operator == "ANDNUM":
-            return reduce(lambda a, b: a & b, operands, 0)
+            return reduce(lambda a, b: a & b, operands)
             
         if self.operator == "IORNUM":
-            return reduce(lambda a, b: a | b, operands, 0)
+            return reduce(lambda a, b: a | b, operands)
             
         if self.operator == "XORNUM":
-            return reduce(lambda a, b: a ^ b, operands, 0)
+            return reduce(lambda a, b: a ^ b, operands)
             
         if self.operator == "NOTNUM":
             return ~operands[0]
@@ -122,13 +138,20 @@ class Operation(Expression):
             return operands[0][operands[1]: operands[2]]
             
         if self.operator == "CONCAT":
-            return sum(operands)
+            return reduce(lambda a, b: "{}{}".format(a, b), operands, '')
             
         if self.operator == "SPSCHR":
             return operands[0][operands[1]]
             
         if self.operator == "FNCALL":
-            return self.environment.functions[operands[1]][operands[0]].execute(operands[2:])
+            return self.environment.functions[operands[1]][operands[0]].execute(*operands[2:])
+            
+        if self.operator == "GETARG":
+            if self.function is None:
+                return None
+                
+            else:
+                return self.function._args[operands[0]]
             
         if self.operator == "NFCALL":
             return getattr(importlib.import_module(operands[1]), operands[0])(operands[2:])
@@ -138,6 +161,9 @@ class Literal(Expression):
         self.environment = environment
         self.value = value
 
+    def __debug_value__(self):
+        return self.value
+        
     def __value__(self):
         return self.value
         
@@ -147,6 +173,9 @@ class FunctionCall(Expression):
         self.scope = scope
         self.name = name
         self.args = args
+        
+    def __debug_value__(self):
+        return "[function {}::{}]".format(self.scope, self.name)
         
     def __value__(self):
         return self.environment.functions[self.scope][self.name].execute(self.args)
@@ -161,16 +190,17 @@ class Function(object):
     def __hash__(self):
         return hash(self.scope.replace(':', '_') + "::" + self.name.replace(':', '_'))
         
-    def execute(self):
+    def execute(self, *args):
         res = None
         labels = {}
         pos = 0
+        self._args = args
         
         while pos < len(self.instructions):
             i = self.instructions[pos]
             status = i.execute()
             
-            if status is None or (status[:5] != "JUMP:" and status[:6] != "LJUMP:"):
+            if status is not None:
                 if status == "SETRES":
                     res = self.environment.return_stack[self]
                     self.environment.return_stack[self] = None
@@ -201,10 +231,15 @@ class Instruction(object):
         self.arguments = args
         self.function = function
         
+    def __debug_value__(self):
+        return self.opcode, tuple(map(dbgvalue, self.arguments))
+        
     def execute(self):
-        arguments = list(map(exvalue, self.arguments))
+        arguments = tuple(map(exvalue, self.arguments))
+        
+        # print(self.opcode, "has arguments", arguments, "derived from", tuple(map(dbgvalue, self.arguments)))
     
-        if self.opcode == 'SETVAR':
+        if self.opcode == 'SETVAR':        
             sc = (arguments[1] if arguments[1] is not None else self.scope)
         
             if sc not in self.environment.variables:
@@ -227,7 +262,14 @@ class Instruction(object):
             
             sc = (scope if scope is not None else self.scope)
             
-            self.environment.functions[sc][name] = Function(self.environment, sc, name, *instructions)
+            if sc not in self.environment.functions:
+                self.environment.functions[sc] = {}
+            
+            f = Function(self.environment, sc, name, *instructions)
+            self.environment.functions[sc][name] = f
+            
+            for i in instructions:
+                i.function = f
             
         elif self.opcode == "RETURN":
             if self.function:
@@ -256,10 +298,13 @@ class Instruction(object):
         elif self.opcode == "PRINTV":
             print(*arguments)
             
+        elif self.opcode == "NULLEV":
+            return # we already evaluated the arguments anyway :P
+            
     def __value__(self):
-        self.execute()
+        return self
         
-class Interpreter(object):
+class Netbyte(object):
     def __init__(self):
         self.variables = {}
         self.functions = {}
@@ -272,49 +317,70 @@ class Interpreter(object):
         sd = data[pos + 4: pos + 4 + length]
         return sd.decode('utf-8')
         
-    def read_literal(self, data, pos, scope=None):
-        ltype = TYPES[data[pos]]
-        length = struct.unpack("=L", data[pos + 1 : pos + 5])[0]
-        sd = data[pos + 5:pos + 5 + length]
+    def read_literal(self, data, pos, scope=None, absolute_pos=None, superlen=None):
+        if absolute_pos is None:
+            absolute_pos = pos
+        
+        length = struct.unpack("=L", data[pos: pos + 4])[0]
+        sd = data[pos + 4:pos + 5 + length]
+        ltype = TYPES[data[pos + 4]]
+        sd = sd[1:]
         
         if ltype == "NULLVL":
+            # print(">", ltype, length, superlen, "@", hex(absolute_pos))
             return Literal(self, None)
             
         elif ltype == "ITNUMS":
-            res = 0
-            
-            for i, char in enumerate(sd):
-                res += struct.unpack("=B", char)[0] * math.pow(2, i)
-                
-            return Literal(self, int(res) - int(math.pow(2, len(sd) - 1)) - 1)
+            fmts = {
+                1: "b",
+                2: "h",
+                4: "i",
+                8: "q"
+            }
+        
+            return Literal(self, struct.unpack("=" + fmts[len(sd)], sd)[0])
             
         elif ltype == "ITNUMU":
-            res = 0
-            
-            for i, char in enumerate(sd):
-                res += char * math.pow(2, i)
-                
-            return Literal(self, int(res))
+            fmts = {
+                1: "B",
+                2: "H",
+                4: "I",
+                8: "Q"
+            }
+        
+            return Literal(self, struct.unpack("=" + fmts[len(sd)], sd)[0])
             
         elif ltype == "FLTNUM":
+            # print(">", ltype, length, superlen, struct.unpack("=f", sd[:4])[0], "@", hex(absolute_pos))
             return Literal(self, struct.unpack("=f", sd[:4])[0])
             
         elif ltype == "DBLNUM":
+            # print(">", ltype, length, superlen, struct.unpack("=d", sd[:8])[0], "@", hex(absolute_pos))
             return Literal(self, struct.unpack("=d", sd[:8])[0])
             
         elif ltype == "STRING":
+            # print(">", ltype, length, superlen, repr(sd.decode('utf-8')), "@", hex(absolute_pos))
             return Literal(self, sd.decode('utf-8'))
             
         elif ltype == "RTINST":
-            return self.read_instruction(sd, 0, scope)
+            # print(">", ltype, length, superlen, "@", hex(absolute_pos))
+            return self.read_instruction(sd, 0, scope, absolute_pos=absolute_pos + 5)[1]
         
-    def read_expression(self, data, pos, scope=None, absolute_pos=None, level=0):
+    def read_expression(self, data, pos, scope=None, absolute_pos=None, level=0, function=None):
         length = struct.unpack("=L", data[pos: pos + 4])[0]
+        
+        if length == 0:
+            # assume NULLVL (null value)
+            return 4, None
+        
         # print(hex(absolute_pos if absolute_pos is not None else pos), length, "L" + str(level))
         expr = data[pos + 4: pos + 4 + length]
         
+        # print(absolute_pos, length, expr[0])
+        
         if expr[0] > 0:
             operator = EXPR_OPCODES[expr[0] - 1]
+            # print(operator)
             # print(">", hex((absolute_pos if absolute_pos is not None else pos) + 3), expr[0], operator)
             rpos = 0
             arguments = []
@@ -324,35 +390,51 @@ class Interpreter(object):
                 rpos += offset 
                 arguments.append(arg)
                 
-            return 4 + length, Operation(self, operator, *arguments, scope=scope)
+            return 4 + length, Operation(self, operator, *arguments, scope=scope, function=function)
         
         else:
-            return 4 + length, self.read_literal(expr, 1, scope)
+            return 4 + length, self.read_literal(expr[1:], 0, scope, absolute_pos=(absolute_pos if absolute_pos is not None else pos) + 5, superlen=length)
         
-    def read_instruction(self, data, pos, scope=None):
+    def read_instruction(self, data, pos, scope=None, absolute_pos=None, function=None):
+        if absolute_pos is None:
+            absolute_pos = pos
+    
         length = struct.unpack("=L", data[pos: pos + 4])[0]
         instruction = data[pos + 4: pos + 4 + length]
-        
         opcode = BASE_OPCODES[instruction[0]]
+        instruction = instruction[1:]
+        
+        # print(opcode, hex(absolute_pos), data[pos:pos + 4 + length])
+        
+        # print(length, opcode)
+        
+        # print(" +", opcode, length, "@", hex(absolute_pos))
+        
         arguments = []
         
         # print(hex(pos + 4), opcode, length)
         
-        rpos = 1
+        rpos = 0
         
-        while rpos < len(instruction):
-            offset, arg = self.read_expression(instruction, rpos, scope, absolute_pos=pos + 5 + rpos)
+        # print(opcode, "of length", length)
+        
+        while rpos + 1 < length:
+            offset, arg = self.read_expression(instruction[rpos:], 0, scope, absolute_pos=absolute_pos + 5 + rpos, function=function)
             rpos += offset
             arguments.append(arg)
             
-        return length + 4, Instruction(self, scope, opcode, *arguments)
+        # print(" @ ", opcode, len(arguments), ':', tuple(map(dbgvalue, arguments)))
+            
+        # print(absolute_pos, length, opcode, len(arguments))
+            
+        return length + 4, Instruction(self, scope, opcode, *arguments, function=function)
         
     def read(self, data):
         pos = 0
         instructions = []
         
         while pos < len(data):
-            offset, instruction = self.read_instruction(data, pos)
+            offset, instruction = self.read_instruction(data, pos, absolute_pos=pos)
             pos += offset
             instructions.append(instruction)
             
@@ -390,6 +472,93 @@ class Interpreter(object):
             if status is None or (status[:5] != "JUMP:" and status[:6] != "LJUMP:"):
                 pos += 1
                 
+        return res
+
+    def dump_expression(self, exp, debug=False, level=0):    
+        res = b''
+    
+        if debug: 
+            print(" . " * level + " >", type(exp).__name__, repr(dbgvalue(exp)))
+    
+        if type(exp) is Instruction:
+            r = self.dump(exp, debug=debug, level=level + 1)
+            res = struct.pack("=LBLB", len(r) + 6, 0, len(r) + 1, TYPES.index("RTINST")) + r
+            
+            if debug: 
+                print(" . " * level, len(r) + 5, res.hex())
+                
+            return res
+            
+        elif type(exp) is Operation:
+            ores = struct.pack("=B", EXPR_OPCODES.index(exp.operator) + 1)
+            
+            for o in exp.operands:                    
+                r = self.dump_expression(o, debug=debug, level=level + 1)
+                ores += r
+                
+            # ores = struct.pack("=L", len(ores)) + ores
+            res += ores
+            
+        elif type(exp) is Literal:
+            res = b'\x00'
+        
+            if type(exp.value) is str:
+                r = struct.pack('=LB{}s'.format(len(exp.value)), len(exp.value.encode('utf-8')), TYPES.index('STRING'), exp.value.encode('utf-8'))
+                res += r
+                
+            elif type(exp.value) is int:
+                elif exp.value > 2147483647:
+                    f = 'q'
+                
+                elif exp.value > 32767:
+                    f = 'i'
+                
+                elif exp.value > 127:
+                    f = 'h'
+                    
+                else:
+                    f = 'b'
+            
+                r = struct.pack('=' + f, exp.value)
+                res += struct.pack('=L', len(r)) + struct.pack('=B', TYPES.index('ITNUMS')) + r
+                    
+            elif type(exp.value) is float:
+                r = struct.pack('=d', exp.value)
+                res += struct.pack('=L', len(r))
+                res += struct.pack('=B', TYPES.index('DBLNUM'))
+                res += r
+                
+            else:
+                res = struct.pack('=LBLB', 6, 0, 1, TYPES.index('NULLVL'))
+                
+                if debug: 
+                    print(" . " * level, res.hex())
+                
+                return res
+        
+        res = struct.pack("=L", len(res)) + res
+        
+        if debug: 
+            print(" . " * level, res.hex())
+                
+        return res
+        
+    def dump(self, *instructions, debug=False, level=0):
+        res = b''
+        
+        for i in instructions:
+            if debug: 
+                print(" . " * level + (i.opcode))
+                
+            ires = struct.pack('=B', BASE_OPCODES.index(i.opcode))
+            
+            for a in i.arguments:
+                ires += self.dump_expression(a, debug=debug, level=level + 1)
+            
+            res += struct.pack("=L", len(ires)) + ires
+            
+            # print(dbgvalue(i), ires)
+            
         return res
         
     def execute_file(self, filename): 

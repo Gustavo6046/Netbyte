@@ -1,7 +1,7 @@
 # Netbyte
 **Byte code, rope flexibility in atomic volume.**
 
------
+## About
 
 For a demonstration of its capabilities, run:
 
@@ -44,8 +44,21 @@ is equivalent to the Python:
         
     main()
     
-And its expression chaining syntax, which makes this so flexible, is inspired by Lisp. See the
+And its expression chaining, inspired by Lisp, is what makes this so flexible. See the
 code, especially that at `netbyte.py`, to learn more about the opcodes (Operation Codes) and
 expcodes (Expression Codes), and all the types too!
 
-No compilers yet.
+It's not meant to be used as a direct language, but rather as an intermediary step for a higher
+level language, with a transpiler. Netbyte has this name because it was originally meant to be
+used in network applications, with network abstractions, as a Java-like language would. Now,
+it's a middle assembly language.
+
+## How to Use?
+
+You will need Python 3 to be able to use Netbyte. To compile, run:
+
+    python compile.py input.nbc [output.nbe]
+    
+To execute, run:
+
+    python main.py input.nbe

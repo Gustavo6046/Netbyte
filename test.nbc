@@ -1,0 +1,10 @@
+SETVAR "X" null 0
+PRINTV "Testing...\n\n=======\n"
+
+MKFUNC "ABCD" null \
+    {GSTVAR "X" null (ADDNUM X (GETARG 0))} \
+    {PRINTV "Added" (GETARG 0) "to X! X is now:" X}
+    
+NULLEV (REPEAT 50 ABCD(20))
+NULLEV (REPEAT 8 ABCD(100))
+RETURN X

@@ -1,5 +1,7 @@
-# import time
+import time
+import warnings
 import struct
+import re
 import math
 import sys
 import importlib
@@ -12,10 +14,13 @@ from functools import reduce
 # Base Operations
 BASE_OPCODES = [
     "SETVAR", # Set Variable : string name, string scope, any value
+    "GSTVAR", # Global Set Variable : string name, any value
     "DELVAR", # Delete Variable : string name
     "MKFUNC", # Make Function : string name, byte string expressions, optional string scope
     "RETURN", # Set return value
     "TERMIN", # Terminate
+    "JUMPIF", # Jump If instruction, with condition and position...
+    "JUMPIN", # Jump If Not instruction, with condition and position...
     "JUMPTO", # Jump To instruction at position...
     "JUMPLB", # Jump to Label
     "MLABEL", # Mark Label
@@ -33,6 +38,8 @@ TYPES = [
     "DBLNUM", # Double Floating Point Number
     "STRING", # String
     "RTINST", # Instruction
+    "BOOLTF", # Boolean True/False
+    "VARRAY", # Value Array
 ]
 
 # Expression Operators
@@ -42,10 +49,19 @@ EXPR_OPCODES = [
     "VTOSTR", # String Conversion : any -> string
     "GETARG", # Get function Argument from index : int -> any
     "REPEAT", # Repeat expression multiple times (for function calls)
+    "FNCALL", # Function Call : string (name), optional string (scope), 0+ anything -> anything
+    "NFCALL", # Native Function Call : string (name), string (module), 0+ anything (no kwargs) -> anything
+    "CHRONO", # Time : optional double offset -> double Unix time
     
     # Comparison Operators
     "EQUALS", # Equation : 2+ any -> bool
     "DIFFER", # Differentiation : 2+ any -> bool
+    
+    # Boolean Logic Operators
+    "LOGAND", # Logic AND : 2+ bool -> bool
+    "LOGIOR", # Logic OR : 2+ bool -> bool
+    "LOGXOR", # Logic XOR : 2+ bool -> bool
+    "LOGNOT", # Logic NOT : bool -> bool
     
     # Numeric Operators
     "ADDNUM", # Addition : 2+ numbers -> number
@@ -63,10 +79,6 @@ EXPR_OPCODES = [
     "SSLICE", # String Slice : string, 2 numbers -> string
     "CONCAT", # Concatenation : 2+ strings -> string
     "SPSCHR", # Char at Position : string, number -> string [length 1]
-    
-    # Misc Operators
-    "FNCALL", # Function Call : string (name), optional string (scope), 0+ anything -> anything
-    "NFCALL", # Native Function Call : string (name), string (module), 0+ anything (no kwargs) -> anything
 ]
 
 def exvalue(expr, *args, **kwargs):
@@ -97,8 +109,10 @@ class Operation(Expression):
         return self.operator, tuple(map(dbgvalue, self.operands))
         
     def __value__(self):
+        # print(self.operator, self.operands)
+        
         if self.operator == "REPEAT":
-            res = None
+            res = None            
         
             for _ in range(exvalue(self.operands[0])):
                 res = exvalue(self.operands[1])
@@ -113,7 +127,7 @@ class Operation(Expression):
             return str(operands[0])
     
         if self.operator == "GETVAR":
-            return self.environment.variables[operands[1]][operands[0]]
+            return self.environment.variables[operands[1] if operands[1] is not None else ''][operands[0]]
     
         if self.operator == "EQUALS":
             return len(set(operands)) < 2
@@ -121,6 +135,9 @@ class Operation(Expression):
         if self.operator == "DIFFER":
             return len(set(operands)) > 1
     
+        if self.operator == "CHRONO":
+            return time.time() + (operands[0] if len(operands) > 0 else 0)
+        
         if self.operator == "ADDNUM":
             return sum(operands)
             
@@ -151,6 +168,18 @@ class Operation(Expression):
         if self.operator == "NOTNUM":
             return ~operands[0]
             
+        if self.operator == "LOGAND":
+            return reduce(lambda a, b: a and b, operands)
+            
+        if self.operator == "LOGIOR":
+            return reduce(lambda a, b: a or b, operands)
+            
+        if self.operator == "LOGXOR":
+            return reduce(lambda a, b: bool(a) != bool(b), operands)
+            
+        if self.operator == "LOGNOT":
+            return not operands[0]
+            
         if self.operator == "SSLICE":
             return operands[0][operands[1]: operands[2]]
             
@@ -161,11 +190,11 @@ class Operation(Expression):
             return operands[0][operands[1]]
             
         if self.operator == "FNCALL":
-            return self.environment.functions[operands[1]][operands[0]].execute(*operands[2:])
+            return self.environment.functions[operands[1] if operands[1] is not None else ''][operands[0]].execute(*operands[2:])
             
         if self.operator == "GETARG":
             if self.function is None:
-                return None
+                return 0
                 
             else:
                 return self.function._args[operands[0]]
@@ -182,32 +211,13 @@ class Literal(Expression):
         return repr(self)
         
     def __repr__(self):
-        return self.value
+        return repr(self.value)
 
     def __debug_value__(self):
         return self.value
         
     def __value__(self):
         return self.value
-        
-class FunctionCall(Expression):
-    def __init__(self, environment, name, *args, scope=None):
-        self.environment = environment
-        self.scope = scope
-        self.name = name
-        self.args = args
-        
-    def __str__(self):
-        return repr(self)
-        
-    def __repr__(self):
-        return "[Function call {}::{}({} arguments)]".format(self.scope, self.name, len(self.args))
-        
-    def __debug_value__(self):
-        return "[function {}::{}]".format(self.scope, self.name)
-        
-    def __value__(self):
-        return self.environment.functions[self.scope][self.name].execute(self.args)
 
 class Function(object):
     def __init__(self, environment, scope, name, *instructions):
@@ -280,8 +290,16 @@ class Instruction(object):
         
         # print(self.opcode, "has arguments", arguments, "derived from", tuple(map(dbgvalue, self.arguments)))
     
-        if self.opcode == 'SETVAR':        
-            sc = (arguments[1] if arguments[1] is not None else self.scope)
+        if self.opcode == 'SETVAR':
+            sc = (self.scope + ":" if self.scope is not None else "") + (arguments[1] if arguments[1] is not None else "")
+        
+            if sc not in self.environment.variables:
+                self.environment.variables[sc] = {}
+            
+            self.environment.variables[sc][arguments[0]] = arguments[2]
+            
+        if self.opcode == 'GSTVAR':
+            sc = ""
         
             if sc not in self.environment.variables:
                 self.environment.variables[sc] = {}
@@ -294,23 +312,34 @@ class Instruction(object):
                 
         elif self.opcode == 'MKFUNC':
             name = arguments[0]
-            scope = arguments[1]
+            scope = (self.scope + ":" if self.scope is not None else "") + (arguments[1] if arguments[1] is not None else "")
             instructions = arguments[2:]
             
             if scope is not None:
                 for i in instructions:
                     i.scope = scope
             
-            sc = (scope if scope is not None else self.scope)
+            if scope not in self.environment.functions:
+                self.environment.functions[scope] = {}
             
-            if sc not in self.environment.functions:
-                self.environment.functions[sc] = {}
+            f = Function(self.environment, scope, name, *instructions)
+            self.environment.functions[scope][name] = f
             
-            f = Function(self.environment, sc, name, *instructions)
-            self.environment.functions[sc][name] = f
-            
+            def set_function(ioo):
+                if type(ioo) is Operation:
+                    ioo.function = (ioo.function if ioo.function is not None else f)
+                
+                    for o in ioo.operands:
+                        set_function(o)
+                        
+                elif type(ioo) is Instruction:
+                    ioo.function = (ioo.function if ioo.function is not None else f)
+                
+                    for o in ioo.arguments:
+                        set_function(o)
+                
             for i in instructions:
-                i.function = f
+                set_function(i)
             
         elif self.opcode == "RETURN":
             if self.function:
@@ -323,6 +352,18 @@ class Instruction(object):
             
         elif self.opcode == "TERMIN":
             return "TERMINATE"
+            
+        elif self.opcode == "JUMPIF":
+            if arguments[0]:
+                return "JUMP:" + str(arguments[1])
+            
+        elif self.opcode == "JUMPIN":
+            if not arguments[0]:
+                return "JUMP:" + str(arguments[1])
+            
+        elif self.opcode == "CALLIF":
+            if arguments[0]:
+                return "JUMP:" + str(arguments[1])
             
         elif self.opcode == "JUMPTO":
             return "JUMP:" + str(arguments[0])
@@ -349,7 +390,13 @@ class Instruction(object):
     def __value__(self):
         return self
         
+class VersionCheckError(BaseException):
+    def __init__(self, msg):
+        self.msg = msg
+        
 class Netbyte(object):
+    VERSION = "0.0.5"
+
     def __init__(self, print_stream=sys.stdout):
         self.variables = {}
         self.functions = {}
@@ -411,6 +458,22 @@ class Netbyte(object):
         elif ltype == "RTINST":
             # print(">", ltype, length, superlen, "@", hex(absolute_pos))
             return self.read_instruction(sd, 0, scope, absolute_pos=absolute_pos + 5)[1]
+            
+        elif ltype == "BOOLTF":
+            return Literal(self, sd[0] > 0)
+            
+        elif ltype == "VARRAY":
+            res = []
+            leng2 = struct.unpack("=L", sd[:4])
+            ad = sd[4:]
+            
+            while len(ad) > 4:
+                sublen = struct.unpack("=L", ad[:4])
+                ad = ad[4:]
+                res.append(read_expression(ad[:sublen]))
+                ad = ad[sublen:]
+            
+            return Literal(self, res)
         
     def read_expression(self, data, pos, scope=None, absolute_pos=None, level=0, function=None):
         length = struct.unpack("=L", data[pos: pos + 4])[0]
@@ -448,6 +511,7 @@ class Netbyte(object):
         length = struct.unpack("=L", data[pos: pos + 4])[0]
         instruction = data[pos + 4: pos + 4 + length]
         opcode = BASE_OPCODES[instruction[0]]
+        
         instruction = instruction[1:]
         
         # print(opcode, hex(absolute_pos), data[pos:pos + 4 + length])
@@ -475,7 +539,15 @@ class Netbyte(object):
             
         return length + 4, Instruction(self, scope, opcode, *arguments, function=function)
         
-    def read(self, data):
+    def read(self, data, name=None):
+        vlen = struct.unpack("=H", data[:2])[0]
+        data = data[2:]
+        v = data[:vlen].decode('utf-8')
+        data = data[vlen:]
+    
+        if v != type(self).VERSION:
+            raise VersionCheckError("The Netbyte code '{}' given to the interpreter is in the wrong version: '{}' instead of '{}'!".format(name, v, type(self).VERSION))
+    
         pos = 0
         instructions = []
         
@@ -486,8 +558,8 @@ class Netbyte(object):
             
         return instructions
         
-    def execute(self, data):
-        instructions = self.read(data)
+    def execute(self, data, name=None):
+        instructions = self.read(data, name)
         
         res = None
         pos = 0
@@ -523,7 +595,7 @@ class Netbyte(object):
     def dump_expression(self, exp, debug=False, level=0):    
         res = b''
     
-        if debug: 
+        if debug:
             print(" . " * level + " >", type(exp).__name__, repr(dbgvalue(exp)))
     
         if type(exp) is Instruction:
@@ -549,8 +621,19 @@ class Netbyte(object):
             res = b'\x00'
         
             if type(exp.value) is str:
-                r = struct.pack('=LB{}s'.format(len(exp.value)), len(exp.value.encode('utf-8')), TYPES.index('STRING'), exp.value.encode('utf-8'))
+                r = struct.pack('=LB{}s'.format(len(exp.value) + 1), len(exp.value.encode('utf-8')), TYPES.index('STRING'), exp.value.encode('utf-8'))
                 res += r
+                
+            elif type(exp.value) in (tuple, list):
+                ares = b''
+                
+                for i in exp.value:
+                    ares += self.dump_expression(i)
+            
+                res += struct.pack("=LB", len(ares) + 1, TYPES.index('VARRAY')) + ares
+                
+            elif type(exp.value) is bool:
+                res += struct.pack("=LB?", 2, TYPES.index("BOOLTF"), exp.value)
                 
             elif type(exp.value) is int:
                 if exp.value > 2147483647:
@@ -591,9 +674,9 @@ class Netbyte(object):
         
     def dump(self, *instructions, debug=False, level=0):
         res = b''
-        
+    
         for i in instructions:
-            if debug: 
+            if debug:
                 print(" . " * level + (i.opcode))
                 
             ires = struct.pack('=B', BASE_OPCODES.index(i.opcode))
@@ -607,5 +690,192 @@ class Netbyte(object):
             
         return res
         
+    def compile(self, *instructions, debug=False):
+        return struct.pack('=H{}s'.format(len(type(self).VERSION)), len(type(self).VERSION), type(self).VERSION.encode('utf-8')) \
+            + self.dump(*instructions, debug=debug)
+        
     def execute_file(self, filename): 
-        return self.execute(open(filename, 'rb').read())
+        return self.execute(open(filename, 'rb').read(), filename)
+        
+    def parenthetic_parse(self, line):
+        level = -1
+        res = ""
+        done = False
+        
+        for char in line:
+            res += char
+            
+            if char in "])}":
+                level -= 1
+                # print(level, char, res)
+                
+            if level > -1:
+                done = True    
+            
+            if char in "[({":
+                level += 1
+                # print(level, char, res)
+                     
+            if level < 0 and done:
+                break          
+            
+        return res
+
+    def argument_tree(self, line):
+        res = []
+        sub = ""
+        parenthetic = False
+        remaining = line
+        quoted = False
+        
+        while len(remaining) > 0:
+            char = remaining[0]
+            
+            if char == '"':
+                quoted = not quoted
+            
+            if char in "[{(" and len(sub) == 0:
+                p = self.parenthetic_parse(remaining)
+                # print( ">", line, "   @   ", p)
+                res.append(p)
+                remaining = remaining[len(p):]
+            
+            else:
+                remaining = remaining[1:]
+            
+                if char in ' ,' and not quoted:
+                    res.append(sub)
+                    sub = ""
+                
+                else:
+                    sub += char
+                
+        if sub != "":
+            res.append(sub)
+            
+        return res
+        
+    def parse_arg(self, argument):
+        if type(argument) is str:
+            if len(argument) > 1 and argument[0] == '"' and argument[-1] == '"':
+                return Literal(self, argument[1:-1]
+                    .replace(r'\n', '\n')
+                    .replace(r'\"', '"')
+                    .replace(r'\'', "'")
+                    .replace('\\\\', '\\')
+                )
+            
+            elif '(' in argument and argument[0] != '(' and argument[-1] == ')':
+                scope = ''
+                name = ''
+                
+                while True:
+                    if argument[0] == '(':
+                        break
+                        
+                    name += argument[0]
+                    
+                    if name.endswith('::'):
+                        scope = name[:-2]
+                        name = ''
+                        
+                    argument = argument[1:]
+                
+                args = tuple(map(self.parse_arg, filter(lambda x: len(x) > 0, self.argument_tree(self.parenthetic_parse(argument[1:-1].strip(' '))))))
+                    
+                return Operation(self, "FNCALL", Literal(self, name), Literal(self, scope), *args)
+            
+            elif argument[0] == "{" and argument[-1] == "}":
+                argument = argument[1:-1].strip(' ')
+                args = list(map(self.parse_arg, filter(lambda x: len(x) > 0, self.argument_tree(' '.join(argument.split(' ')[1:])))))
+            
+                return Instruction(
+                    self, None,
+                    argument.split(' ')[0],
+                    *args
+                )
+                
+            elif argument[0] == "(" and argument[-1] == ")":
+                argument = argument[1:-1].strip(' ')
+                
+                code = argument.split(' ')[0]    
+                args = tuple(map(self.parse_arg, filter(lambda x: len(x) > 0, self.argument_tree(' '.join(argument.split(' ')[1:])))))
+            
+                return Operation(self, code, *args)
+                
+            elif argument[0] == "[" and argument[-1] == "]":
+                argument = argument[1:-1].strip(' ')
+                
+                res = []
+                sub = ""
+                is_str = False
+                
+                for c in argument:
+                    if c == ":" and not is_str:
+                        res.append(self.parse_arg(sub))
+                        sub = ""
+                
+                    else:
+                        sub += c
+                        
+                        if c == '"':
+                            is_str = not is_str
+                        
+                return Literal(self, res)
+                
+            elif argument.upper() in ("NULL", "NONE"):
+                return Literal(self, None)
+                
+            elif argument.upper() == "TRUE":
+                return Literal(self, True)
+                
+            elif argument.upper() == "FALSE":
+                return Literal(self, False)
+                
+            elif len(tuple(filter(lambda x: x in '0123456789', argument))) == len(argument):
+                return Literal(self, int(argument))
+                
+            elif argument.count('.') == 1 \
+                    and len(filter(lambda x: x in '0123456789', argument.split('.')[0])) == len(argument.split('.')[0])\
+                    and len(filter(lambda x: x in '0123456789', argument.split('.')[1])) == len(argument.split('.')[1]):
+                return Literal(self, float(argument))
+                
+            elif argument.startswith('0x') and len(filter(lambda x: x in '0123456789ABCDEF', argument[2:])) == len(argument) - 2:
+                return Literal(self, int(argument[2:], 16))
+                
+            elif argument.startswith('0o') and len(filter(lambda x: x in '01234567', argument[2:])) == len(argument) - 2:
+                return Literal(self, int(argument[2:], 8))
+                
+            elif argument.startswith('0b') and len(filter(lambda x: x in '01', argument[2:])) == len(argument) - 2:
+                return Literal(self, int(argument[2:], 2))
+                
+            else:
+                return Operation(self, "GETVAR", Literal(self, argument), Literal(self, None))
+                    
+        return Literal(self, None)
+                    
+    def parse(self, assembly, name=None):
+        instructions = []
+        assembly = re.sub(r'//[^\n]+', '', assembly)
+        assembly = re.sub(r' +', ' ', assembly)
+    
+        for l in re.split(r'(?<!\\)\n', assembly):
+            l = l.replace('\\\n', ' ')
+            l = l.strip(' ')
+        
+            if re.sub(r'^\s+$', '', l) == '':
+                continue
+        
+            opcode = l.split(' ')[0]
+            
+            if opcode not in BASE_OPCODES:
+                warnings.warn("Code @ '{}': {} is not a valid opcode!".format(name, opcode))
+            
+            arguments = tuple(map(self.parse_arg, filter(lambda x: len(x) > 0, self.argument_tree(' '.join(l.split(' ')[1:])))))
+            # print(arguments)
+            instructions.append(Instruction(self, None, opcode, *arguments))
+        
+        return instructions
+        
+    def parse_file(self, filename):
+        return self.parse(open(filename).read(), filename)

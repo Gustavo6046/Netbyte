@@ -44,7 +44,7 @@ is equivalent to the Python:
         
     main()
     
-And its expression chaining syntax, which makes this so flexible, is inspired by Lisp. See the
+And its expression chaining, inspired by Lisp, is what makes this so flexible. See the
 code, especially that at `netbyte.py`, to learn more about the opcodes (Operation Codes) and
 expcodes (Expression Codes), and all the types too!
 

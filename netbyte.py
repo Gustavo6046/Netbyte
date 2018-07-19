@@ -50,12 +50,18 @@ EXPR_OPCODES = [
     "GETARG", # Get function Argument from index : int -> any
     "REPEAT", # Repeat expression multiple times (for function calls)
     "FNCALL", # Function Call : string (name), optional string (scope), 0+ anything -> anything
+    "IFELSE", # Ternary Operator : bool (condition), 2 anything -> anything
+    "IFORNL", # Ternary Operator w/ Null : bool (condition), anything -> anything or null
     "NFCALL", # Native Function Call : string (name), string (module), 0+ anything (no kwargs) -> anything
     "CHRONO", # Time : optional double offset -> double Unix time
     
     # Comparison Operators
     "EQUALS", # Equation : 2+ any -> bool
     "DIFFER", # Differentiation : 2+ any -> bool
+    "GTRTHN", # Greather Than : 2 numbers -> bool
+    "LSRTHN", # Lesser Than : 2 numbers -> bool
+    "GTREQU", # Greather Than or Equal To : 2 numbers -> bool
+    "LSREQU", # Lesser Than or Equal To : 2 numbers -> bool
     
     # Boolean Logic Operators
     "LOGAND", # Logic AND : 2+ bool -> bool
@@ -135,11 +141,49 @@ class Operation(Expression):
         if self.operator == "DIFFER":
             return len(set(operands)) > 1
     
+        if self.operator == "GTRTHN":
+            return operands[0] > operands[1]
+    
+        if self.operator == "LSRTHN":
+            return operands[0] < operands[1]
+    
+        if self.operator == "GTREQU":
+            return operands[0] >= operands[1]
+    
+        if self.operator == "LSREQU":
+            return operands[0] <= operands[1]
+    
         if self.operator == "CHRONO":
             return time.time() + (operands[0] if len(operands) > 0 else 0)
         
         if self.operator == "ADDNUM":
             return sum(operands)
+            
+        if self.operator == "IFELSE":
+            if operands[0]:
+                if type(operands[1]) is Instruction:
+                    return operands[1].execute()
+                
+                else:
+                    return operands[1]
+                
+            else:
+                if type(operands[2]) is Instruction:
+                    return operands[2].execute()
+                
+                else:
+                    return operands[2]
+            
+        if self.operator == "IFORNL":
+            if operands[0]:
+                if type(operands[1]) is Instruction:
+                    return operands[1].execute()
+                
+                else:
+                    return operands[1]
+                
+            else:
+                return None
             
         if self.operator == "SUBNUM":
             return operands[0] - operands[1]
@@ -355,24 +399,20 @@ class Instruction(object):
             
         elif self.opcode == "JUMPIF":
             if arguments[0]:
-                return "JUMP:" + str(arguments[1])
+                return "LJUMP:{}:".format(self.scope) + str(arguments[1])
             
         elif self.opcode == "JUMPIN":
             if not arguments[0]:
-                return "JUMP:" + str(arguments[1])
-            
-        elif self.opcode == "CALLIF":
-            if arguments[0]:
-                return "JUMP:" + str(arguments[1])
+                return "LJUMP:{}:".format(self.scope) + str(arguments[1])
             
         elif self.opcode == "JUMPTO":
             return "JUMP:" + str(arguments[0])
             
         elif self.opcode == "MLABEL":
-            return "LABEL:{}:{}".format(arguments[0], arguments[1])
+            return "LABEL:{}:{}".format(self.scope, arguments[0])
             
         elif self.opcode == "JUMPLB":
-            return "LJUMP:" + arguments[0]
+            return "LJUMP:{}:".format(self.scope) + arguments[0]
             
         elif self.opcode == "EXFILE":
             self.environment.execute(open(self.arguments[0], 'rb').read())
@@ -395,7 +435,7 @@ class VersionCheckError(BaseException):
         self.msg = msg
         
 class Netbyte(object):
-    VERSION = "0.0.5"
+    VERSION = "0.0.6"
 
     def __init__(self, print_stream=sys.stdout):
         self.variables = {}
@@ -537,7 +577,7 @@ class Netbyte(object):
             
         # print(absolute_pos, length, opcode, len(arguments))
             
-        return length + 4, Instruction(self, scope, opcode, *arguments, function=function)
+        return length + 4, Instruction(self, scope, opcode.upper(), *arguments, function=function)
         
     def read(self, data, name=None):
         vlen = struct.unpack("=H", data[:2])[0]
@@ -584,8 +624,7 @@ class Netbyte(object):
                     pos = labels[status[6:]]
                     
                 elif status[:6] == "LABEL:":
-                    labels[status.split(':')[1]] = pos + 1
-                    pos = int(status.split(':')[2])
+                    labels[status[6:]] = pos + 1
                 
             if status is None or (status[:5] != "JUMP:" and status[:6] != "LJUMP:"):
                 pos += 1
@@ -791,7 +830,7 @@ class Netbyte(object):
             
                 return Instruction(
                     self, None,
-                    argument.split(' ')[0],
+                    argument.split(' ')[0].upper(),
                     *args
                 )
                 
@@ -801,7 +840,7 @@ class Netbyte(object):
                 code = argument.split(' ')[0]    
                 args = tuple(map(self.parse_arg, filter(lambda x: len(x) > 0, self.argument_tree(' '.join(argument.split(' ')[1:])))))
             
-                return Operation(self, code, *args)
+                return Operation(self, code.upper(), *args)
                 
             elif argument[0] == "[" and argument[-1] == "]":
                 argument = argument[1:-1].strip(' ')
@@ -868,12 +907,12 @@ class Netbyte(object):
         
             opcode = l.split(' ')[0]
             
-            if opcode not in BASE_OPCODES:
+            if opcode.upper() not in BASE_OPCODES:
                 warnings.warn("Code @ '{}': {} is not a valid opcode!".format(name, opcode))
             
             arguments = tuple(map(self.parse_arg, filter(lambda x: len(x) > 0, self.argument_tree(' '.join(l.split(' ')[1:])))))
             # print(arguments)
-            instructions.append(Instruction(self, None, opcode, *arguments))
+            instructions.append(Instruction(self, None, opcode.upper(), *arguments))
         
         return instructions
         

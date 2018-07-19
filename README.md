@@ -1,7 +1,7 @@
 # Netbyte
 **Byte code, rope flexibility in atomic volume.**
 
------
+## About
 
 For a demonstration of its capabilities, run:
 
@@ -48,4 +48,12 @@ And its expression chaining, inspired by Lisp, is what makes this so flexible. S
 code, especially that at `netbyte.py`, to learn more about the opcodes (Operation Codes) and
 expcodes (Expression Codes), and all the types too!
 
-No compilers yet.
+## How to Use?
+
+You will need Python 3 to be able to use Netbyte. To compile, run:
+
+    python compile.py input.nbc [output.nbe]
+    
+To execute, run:
+
+    python main.py input.nbe

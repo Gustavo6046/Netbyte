@@ -48,6 +48,11 @@ And its expression chaining, inspired by Lisp, is what makes this so flexible. S
 code, especially that at `netbyte.py`, to learn more about the opcodes (Operation Codes) and
 expcodes (Expression Codes), and all the types too!
 
+It's not meant to be used as a direct language, but rather as an intermediary step for a higher
+level language, with a transpiler. Netbyte has this name because it was originally meant to be
+used in network applications, with network abstractions, as a Java-like language would. Now,
+it's a middle assembly language.
+
 ## How to Use?
 
 You will need Python 3 to be able to use Netbyte. To compile, run:

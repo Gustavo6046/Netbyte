@@ -228,7 +228,7 @@ class Operation(Expression):
             return operands[0][operands[1]: operands[2]]
             
         if self.operator == "CONCAT":
-            return reduce(lambda a, b: "{}{}".format(a, b), operands, '')
+            return reduce(lambda a, b: "{}{}".format(str(a), str(b)), operands, '')
             
         if self.operator == "SPSCHR":
             return operands[0][operands[1]]
@@ -335,12 +335,12 @@ class Instruction(object):
         # print(self.opcode, "has arguments", arguments, "derived from", tuple(map(dbgvalue, self.arguments)))
     
         if self.opcode == 'SETVAR':
-            sc = (self.scope + ":" if self.scope is not None else "") + (arguments[1] if arguments[1] is not None else "")
+            sc = (self.scope + ":" if self.scope is not None else "") + (arguments[2] if len(arguments) > 2 else "")
         
             if sc not in self.environment.variables:
                 self.environment.variables[sc] = {}
             
-            self.environment.variables[sc][arguments[0]] = arguments[2]
+            self.environment.variables[sc][arguments[0]] = arguments[1]
             
         if self.opcode == 'GSTVAR':
             sc = ""
@@ -348,7 +348,7 @@ class Instruction(object):
             if sc not in self.environment.variables:
                 self.environment.variables[sc] = {}
         
-            self.environment.variables[sc][arguments[0]] = arguments[2]
+            self.environment.variables[sc][arguments[0]] = arguments[1]
             
         elif self.opcode == 'DELVAR':
             if self.scope in self.environment.variables and arguments[0] in self.environment.variables[self.scope]:
@@ -435,7 +435,7 @@ class VersionCheckError(BaseException):
         self.msg = msg
         
 class Netbyte(object):
-    VERSION = "0.0.6"
+    VERSION = "0.0.7"
 
     def __init__(self, print_stream=sys.stdout):
         self.variables = {}
@@ -875,8 +875,8 @@ class Netbyte(object):
                 return Literal(self, int(argument))
                 
             elif argument.count('.') == 1 \
-                    and len(filter(lambda x: x in '0123456789', argument.split('.')[0])) == len(argument.split('.')[0])\
-                    and len(filter(lambda x: x in '0123456789', argument.split('.')[1])) == len(argument.split('.')[1]):
+                    and len(tuple(filter(lambda x: x in '0123456789', argument.split('.')[0]))) == len(argument.split('.')[0])\
+                    and len(tuple(filter(lambda x: x in '0123456789', argument.split('.')[1]))) == len(argument.split('.')[1]):
                 return Literal(self, float(argument))
                 
             elif argument.startswith('0x') and len(filter(lambda x: x in '0123456789ABCDEF', argument[2:])) == len(argument) - 2:

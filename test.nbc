@@ -1,16 +1,16 @@
-SETVAR "X" null 0
-SETVAR "i" null 0
+SETVAR "X" 0
+SETVAR "i" 0
 PRINTV "Testing...\n\n=======\n"
 
 MKFUNC "ABCD" null \
-    {GSTVAR "X" null (ADDNUM X (GETARG 0))} \
+    {GSTVAR "X" (ADDNUM X (GETARG 0))} \
     {PRINTV "Added" (GETARG 0) "to X! X is now:" X}
     
 MLABEL "Loop"
 NULLEV (REPEAT 50 ABCD(20))
-NULLEV (REPEAT 8 ABCD(100))
-SETVAR "i" null (ADDNUM i 1)
-PRINTV (CONCAT "--- Iteration #" (VTOSTR i)) "Finished ---"
+NULLEV (REPEAT 30 ABCD(100))
+SETVAR "i" (ADDNUM i 1)
+PRINTV (CONCAT "--- Iteration #" i) "Finished ---"
 JUMPIF (LSRTHN X 10000) "Loop"
-NULLEV (IFELSE (LSRTHN X 50000) {PRINTV "X is smaller than 50000."} {PRINTV "X is greater than or equal to 50000."})
+NULLEV (IFELSE (LSRTHN X 11000) {PRINTV X "is smaller than 11000."} {PRINTV X "is greater than or equal to 11000."})
 RETURN X

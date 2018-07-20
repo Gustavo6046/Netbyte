@@ -1135,11 +1135,30 @@ class Netbyte(object):
             elif argument == '%*':
                 return Operation(self, "GETARG", Literal(self, None))
                 
+            elif argument == '&':
+                return Literal(self, "")
+                
             elif argument.startswith('%'):
                 return Operation(self, "GETARG", self.parse_arg(argument[1:]))
                 
             else:
-                return Operation(self, "GETVAR", Literal(self, argument), Literal(self, None))
+                scope = None
+                name = ''
+                
+                while len(argument) > 0:
+                    name += argument[0]
+                    
+                    if name.endswith('::'):
+                        scope = name[:-2]
+                        
+                        if scope == "&":
+                            scope = ''
+                        
+                        name = ''
+                        
+                    argument = argument[1:]
+            
+                return Operation(self, "GETVAR", Literal(self, name), Literal(self, scope))
                     
         return Literal(self, None)
                     

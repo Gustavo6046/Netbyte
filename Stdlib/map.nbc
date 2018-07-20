@@ -1,0 +1,31 @@
+MKFUNC "map" "map" \
+    {SETVAR "i" 0} \
+    {SETVAR "keys" []} \
+    {SETVAR "vals" []} \
+    {MLABEL "loop"} \
+    {SETVAR "arg" %i} \
+    {NULLEV \
+        (IFELSE (DIFFER arg SPNULL) \
+            (IFELSE (EQUALS (MODNUM i 2) 0) \
+                (NPCALL (PYATTR "append" keys) arg) \
+                (NPCALL (PYATTR "append" vals) arg) \
+            ) \
+        ) \
+    } \
+    {SETVAR "i" (ADDNUM i 1)} \
+    {JUMPIF (DIFFER arg SPNULL) "loop"} \
+    {RETURN (NFCALL "dict" null (NFCALL "zip" null keys vals))}
+    
+MKFUNC "set" "map" \
+    {NULLEV (PYSITM %0 %1 %2)} \
+    {RETURN %0}
+    
+MKFUNC "get" "map" \ // more of a shortcut really
+    {RETURN (PYGITM %0 %1 %2)}
+    
+MKFUNC "remove" "map" \
+    {NULLEV (NPCALL (PYATTR "pop" %0) %1)} \
+    {RETURN %0}
+    
+MKFUNC "pop" "map" \
+    {RETURN [%0 (NPCALL (PYATTR "pop" %0) %1)]}

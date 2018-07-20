@@ -60,8 +60,13 @@ EXPR_OPCODES = [
     "CHRONO", # Time : optional double offset -> double Unix time
     "EXECUT", # Execute given instructions and return null.
     "PYATTR", # Get Python attribute from expression, e.g. (NPCALL (PYATTR "read" (NFCALL open "myFile.txt")))
-    "PYITEM", # Get Python item from expression, e.g. (PYITEM "argv" (PYMODL "sys"))
+    "PYGITM", # Get Python item from expression, e.g. (PYGITM "argv" (PYMODL "sys"))
+    "PYSITM", # Set Python item to expression.
     "PYMODL", # Import Python module
+    "FNCARG", # Function Call (apply Arguments)
+    "NFCARG", # Native Function Call (apply Arguments)
+    "FPCARG", # Function Pointer Call (apply Arguments)
+    "NPCARG", # Native Function Object Call (apply Arguments)
     
     # Comparison Operators
     "ISSAME", # Equation : 2+ any -> bool
@@ -83,6 +88,7 @@ EXPR_OPCODES = [
     "SUBNUM", # Subtraction : 2 numbers -> number
     "MULNUM", # Multiplication : 2+ numbers -> number
     "DIVNUM", # Division : 2 numbers -> number
+    "MODNUM", # Modulo : 2 numbers -> number
     "POWNUM", # Power : 2 numbers -> number
     "ROTNUM", # Root Root : 2 number -> number
     "ANDNUM", # Bitwise AND : 2+ numbers -> number
@@ -146,7 +152,7 @@ class Operation(Expression):
         return "[{} operation with {} operands]".format(self.operator, len(self.operands))
         
     def __debug_value__(self):
-        return self.operator, tuple(map(dbgvalue, self.operands))
+        return self.operator + '(' + ' '.join(tuple(map(dbgvalue, self.operands))) + ')'
         
     def __value__(self):
         # print(self.operator, self.operands)
@@ -158,6 +164,22 @@ class Operation(Expression):
                 res = exvalue(self.operands[1])
                 
             return res
+            
+        elif self.operator == "IFELSE":
+            if exvalue(self.operands[0]):
+                if type(self.operands[0]) is Instruction:
+                    return self.operands[0].execute()
+            
+                return exvalue(self.operands[1])
+                
+            else:
+                if len(self.operands) > 2:
+                    if type(self.operands[0]) is Instruction:
+                        return self.operands[0].execute()
+                      
+                    return exvalue(self.operands[2])
+                        
+                return SPNULL
             
         try:
             operands = tuple(map(exvalue, self.operands))
@@ -173,7 +195,16 @@ class Operation(Expression):
             return str(operands[0])
     
         if self.operator == "GETVAR":
-            return self.environment.variables[operands[1] if operands[1] is not None else ''][operands[0]]
+            sc = operands[1] if operands[1] is not None else (self.scope if self.scope is not None else '')
+        
+            try:
+                return self.environment.variables[sc][operands[0]]
+                
+            except KeyError:
+                print(operands)
+                print(repr(sc))
+                print(self.environment.variables)
+                raise
     
         if self.operator == "EQUALS":
             return len(set(operands)) < 2
@@ -202,8 +233,12 @@ class Operation(Expression):
         if self.operator == "GTREQU":
             return operands[0] >= operands[1]
     
-        if self.operator == "PYITEM":
+        if self.operator == "PYGITM":
             return operands[0][operands[1]]
+            
+        if self.operator == "PYSITM":
+            operands[0][operands[1]] = operands[2]
+            return operands[0]
             
         if self.operator == "PYMODL":
             return importlib.import_module(operands[0])
@@ -227,21 +262,6 @@ class Operation(Expression):
         
             return None
             
-        if self.operator == "IFELSE":
-            if operands[0]:
-                if type(operands[1]) is Instruction:
-                    return operands[1].execute()
-                
-                else:
-                    return operands[1]
-                
-            else:
-                if type(operands[2]) is Instruction:
-                    return operands[2].execute()
-                
-                else:
-                    return operands[2]
-            
         if self.operator == "IFORNL":
             if operands[0]:
                 if type(operands[1]) is Instruction:
@@ -261,6 +281,9 @@ class Operation(Expression):
             
         if self.operator == "DIVNUM":
             return operands[0] / operands[1]
+            
+        if self.operator == "MODNUM":
+            return operands[0] % operands[1]
             
         if self.operator == "POWNUM":
             return math.pow(operands[0], operands[1])
@@ -307,9 +330,18 @@ class Operation(Expression):
         if self.operator == "FPCALL":
             return operands[0].execute(*nospnul[1:])
             
+        if self.operator == "FNCARG":
+            return self.environment.functions[operands[1] if operands[1] is not None else ''][operands[0]].execute(*nospnul[2])
+            
+        if self.operator == "FPCARG":
+            return operands[0].execute(*nospnul[1])
+            
         if self.operator == "GETARG":
             if self.function is None:
                 return SPNULL
+                
+            elif operands[0] == None:
+                return self.function._args
                 
             elif len(self.function._args) <= operands[0]:
                 return SPNULL
@@ -337,8 +369,31 @@ class Operation(Expression):
                 else:
                     raise NativeFunctionError("Native function not found in '{}' module: '{}'".format(operands[1], operands[0]))
         
+        if self.operator == "NFCARG":
+            if operands[1] is None or len(operands) < 2:
+                if operands[0] in globals():
+                    return globals()[operands[0]](*operands[2])
+                    
+                elif operands[0] in __builtins__:
+                    return __builtins__[operands[0]](*operands[2])
+                    
+                else:
+                    raise NativeFunctionError("ERROR:NativeFunctionError:Native function not found in builtins nor globals: '{}'".format(operands[0]))
+        
+            else:
+                mod = importlib.import_module(operands[1])
+            
+                if hasattr(mod, operands[0]):
+                    return getattr(mod, operands[0])(*nospnul[2])
+                    
+                else:
+                    raise NativeFunctionError("Native function not found in '{}' module: '{}'".format(operands[1], operands[0]))
+        
         if self.operator == "NPCALL":
             return operands[0](*nospnul[1:])
+        
+        if self.operator == "NPCARG":
+            return operands[0](*nospnul[1])
         
         if self.operator == "PYATTR":
             if hasattr(operands[1], operands[0]):
@@ -359,7 +414,7 @@ class Literal(Expression):
         return repr(self.value)
 
     def __debug_value__(self):
-        return "[ {} ]".format(repr(self.value))
+        return ":{}".format(repr(self.value))
         
     def __value__(self):
         return self.value
@@ -405,8 +460,7 @@ class Function(object):
                     pos = labels[status[6:]]
                     
                 elif status[:6] == "LABEL:":
-                    labels[status.split(':')[1]] = pos + 1
-                    pos = int(status.split(':')[2])
+                    labels[status[6:]] = pos + 1
                     
             if status is None or (status[:5] != "JUMP:" and status[:6] != "LJUMP:"):
                 pos += 1
@@ -428,7 +482,7 @@ class Instruction(object):
         return "[{} instruction]".format(self.opcode)
         
     def __debug_value__(self):
-        return self.opcode, tuple(map(dbgvalue, self.arguments))
+        return self.opcode + '(' + ' '.join(tuple(map(dbgvalue, self.arguments))) + ')'
         
     def execute(self):
         arguments = tuple(map(exvalue, self.arguments))
@@ -437,7 +491,7 @@ class Instruction(object):
         # print(self.opcode, "has arguments", arguments, "derived from", tuple(map(dbgvalue, self.arguments)))
     
         if self.opcode == 'SETVAR':
-            sc = (self.scope + ":" if self.scope is not None else "") + (arguments[2] if len(arguments) > 2 else "")
+            sc = "::".join(tuple(filter(lambda x: x is not None, ((self.scope if self.scope is not None else None), (arguments[2] if len(arguments) > 2 else None)))))
         
             if sc not in self.environment.variables:
                 self.environment.variables[sc] = {}
@@ -473,12 +527,14 @@ class Instruction(object):
             
             def set_function(ioo):
                 if type(ioo) is Operation:
+                    ioo.scope = f.scope or ioo.scope
                     ioo.function = (ioo.function if ioo.function is not None else f)
                 
                     for o in ioo.operands:
                         set_function(o)
                         
                 elif type(ioo) is Instruction:
+                    ioo.scope = f.scope or ioo.scope
                     ioo.function = (ioo.function if ioo.function is not None else f)
                 
                     for o in ioo.arguments:
@@ -560,7 +616,7 @@ class VersionCheckError(BaseException):
         return self.msg
         
 class Netbyte(object):
-    VERSION = "0.1.0"
+    VERSION = "0.1.1"
 
     def __init__(self, print_stream=sys.stdout):
         self.variables = {}
@@ -633,14 +689,12 @@ class Netbyte(object):
             
         elif ltype == "VARRAY":
             res = []
-            leng2 = struct.unpack("=L", sd[:4])
-            ad = sd[4:]
             
-            while len(ad) > 4:
-                sublen = struct.unpack("=L", ad[:4])
-                ad = ad[4:]
-                res.append(read_expression(ad[:sublen]))
-                ad = ad[sublen:]
+            while len(sd) > 4:
+                sublen = struct.unpack("=L", sd[:4])
+                sd = sd[4:]
+                res.append(resd_expression(sd[:sublen]))
+                sd = sd[sublen:]
             
             return Literal(self, res)
         
@@ -764,7 +818,7 @@ class Netbyte(object):
         res = b''
     
         if debug:
-            print(" . " * level + " >", type(exp).__name__, repr(dbgvalue(exp)))
+            print(" . " * level + " >", type(exp).__name__, dbgvalue(exp))
     
         if type(exp) is Instruction:
             r = self.dump(exp, debug=debug, level=level + 1)
@@ -914,11 +968,12 @@ class Netbyte(object):
             if char == '"':
                 quoted = not quoted
             
-            if char in "[{(" and len(sub) == 0:
+            if char in "[{(":
                 p = self.parenthetic_parse(remaining)
-                # print( ">", line, "   @   ", p)
-                res.append(p)
+                # print("#", sub + p)
+                res.append(sub + p)
                 remaining = remaining[len(p):]
+                sub = ""
             
             else:
                 remaining = remaining[1:]
@@ -960,8 +1015,12 @@ class Netbyte(object):
                         name = ''
                         
                     argument = argument[1:]
+                    
+                if argument == '()':
+                    args = ()
                 
-                args = tuple(map(self.parse_arg, filter(lambda x: len(x) > 0, self.argument_tree(self.parenthetic_parse(argument[1:-1].strip(' '))))))
+                else:
+                    args = tuple(map(self.parse_arg, filter(lambda x: len(x) > 0, self.argument_tree(self.parenthetic_parse(argument[1:-1].strip(' '))))))
                     
                 return Operation(self, "FNCALL", Literal(self, name), Literal(self, scope), *args)
             
@@ -1035,8 +1094,11 @@ class Netbyte(object):
             elif argument.startswith('@'):
                 return FunctionPointer(self, argument[1:])
                 
+            elif argument == '%*':
+                return Operation(self, "GETARG", Literal(self, None))
+                
             elif argument.startswith('%'):
-                return Operation(self, "GETARG", Literal(self, int(argument[1:])))
+                return Operation(self, "GETARG", self.parse_arg(argument[1:]))
                 
             else:
                 return Operation(self, "GETVAR", Literal(self, argument), Literal(self, None))
@@ -1050,8 +1112,10 @@ class Netbyte(object):
         instructions = []
         assembly = re.sub(r'//[^\n]+', '', assembly)
         assembly = re.sub(r' +', ' ', assembly)
+        assembly = re.sub(r' ?/\*[\n.]*?\*/ ?', '', assembly, flags=re.S)
+        assembly = re.sub(r'\\\s*?\n', '', assembly)
     
-        for l in re.split(r'(?<!\\)\n', assembly):
+        for l in assembly.splitlines():
             if l.startswith("#"):
                 command = l[1:]
                 op = command.split(' ')[0].upper()

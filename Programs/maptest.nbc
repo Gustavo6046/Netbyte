@@ -1,0 +1,6 @@
+#STDINCLUDE map
+
+SETVAR "mymap" map::map(1 2 3 4 5 6)
+PRINTV mymap
+PRINTV map::pop(mymap 3)
+PRINTV mymap

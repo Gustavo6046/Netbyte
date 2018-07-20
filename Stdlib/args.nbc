@@ -1,2 +1,2 @@
 MKFUNC "arg" "args" \
-    {RETURN (PYITEM (PYATTR "argv" (PYMODL "sys")) (ADDNUM 2 %0))}
+    {RETURN (PYGITM (PYATTR "argv" (PYMODL "sys")) (ADDNUM 2 %0))}

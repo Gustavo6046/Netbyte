@@ -47,6 +47,7 @@ TYPES = [
 # Expression Operators
 EXPR_OPCODES = [
     # Generic Operators
+    "FORALL", # Iterate on List or Dict
     "GETVAR", # Retrieve Variable : string name, string scope -> any
     "VTOSTR", # String Conversion : any -> string
     "GETARG", # Get function Argument from index : int -> any
@@ -193,6 +194,34 @@ class Operation(Expression):
     
         if self.operator == "VTOSTR":
             return str(operands[0])
+    
+        if self.operator == "FORALL":
+            f = Function(self.environment, "__FOR__", "__FOR__", *operands[1:])
+            
+            def set_function(ioo):
+                if type(ioo) is Operation:
+                    ioo.scope = f.scope or ioo.scope
+                    ioo.function = (ioo.function if ioo.function is not None else f)
+                
+                    for o in ioo.operands:
+                        set_function(o)
+                        
+                elif type(ioo) is Instruction:
+                    ioo.scope = f.scope or ioo.scope
+                    ioo.function = (ioo.function if ioo.function is not None else f)
+                
+                    for o in ioo.arguments:
+                        set_function(o)
+                
+            for o in operands[1:]:
+                set_function(o)
+        
+            res = []
+        
+            for item in operands[0]:
+                res.append(f.execute(item))
+                
+            return res
     
         if self.operator == "GETVAR":
             sc = operands[1] if operands[1] is not None else (self.scope if self.scope is not None else '')
@@ -616,7 +645,7 @@ class VersionCheckError(BaseException):
         return self.msg
         
 class Netbyte(object):
-    VERSION = "0.1.1"
+    VERSION = "0.1.2"
 
     def __init__(self, print_stream=sys.stdout):
         self.variables = {}
@@ -1077,10 +1106,19 @@ class Netbyte(object):
             elif len(tuple(filter(lambda x: x in '0123456789', argument))) == len(argument):
                 return Literal(self, int(argument))
                 
+            elif len(tuple(filter(lambda x: x in '0123456789', argument[1:]))) == len(argument[1:]) and argument.startswith('-'):
+                return Literal(self, -int(argument[1:]))
+                
             elif argument.count('.') == 1 \
                     and len(tuple(filter(lambda x: x in '0123456789', argument.split('.')[0]))) == len(argument.split('.')[0])\
                     and len(tuple(filter(lambda x: x in '0123456789', argument.split('.')[1]))) == len(argument.split('.')[1]):
                 return Literal(self, float(argument))
+                
+            elif argument[1:].count('.') == 1 \
+                    and len(tuple(filter(lambda x: x in '0123456789', argument[1:].split('.')[0]))) == len(argument[1:].split('.')[0])\
+                    and len(tuple(filter(lambda x: x in '0123456789', argument[1:].split('.')[1]))) == len(argument[1:].split('.')[1])\
+                    and argument.startswith('-'):
+                return Literal(self, -float(argument[1:]))
                 
             elif argument.startswith('0x') and len(filter(lambda x: x in '0123456789ABCDEF', argument[2:])) == len(argument) - 2:
                 return Literal(self, int(argument[2:], 16))

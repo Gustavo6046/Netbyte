@@ -664,7 +664,7 @@ class VersionCheckError(BaseException):
         return self.msg
         
 class Netbyte(object):
-    VERSION = "0.1.3"
+    VERSION = "0.1.4"
 
     def __init__(self, print_stream=sys.stdout):
         self.variables = {

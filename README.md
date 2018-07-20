@@ -1,84 +1,47 @@
 # Netbyte
-**Byte code, rope flexibility in atomic volume.**
+**Byte code, rope flexibility with versatile networking.**
 
 ## About
+Netbyte is a compiled intermediary language, with a compiler and virtual machine, written for Python.
+It has a slightly Lisp-inspired syntax, with an Assembly/Batch-like statement flow logic,
+and is quite flexible. Most of the things you can do in Python, you can do with binary
+files and Netbyte.
 
-For a demonstration of its capabilities, run:
+Its flexibility comes from the fact it can store anything in two forms:
 
-    python main.py test.nbe
-    
-Such will run the bytecode file `test.nbe`, which weights just **908 bytes!** In that very space,
-we can print a few strings, and add 20 and 100 to an X variable several times, using function arguments,
-then verify if the result is larger than a set number (11000).
+ * Python objects - Instruction, Operation, Function, etc.
+ 
+ * Binary compiled code, the target of the compiler, **and** what the
+   interpreter runs. This is what should be sent by sockets when sending
+   instructions, not pickled Python objects.
 
-And yes, the file has a return value, much like a function!
+It is not meant to be used as a direct language. Like Neko, it is meant to be
+used as a compilation target, but, unlike Neko, the compiled binary code is
+merely an architecture, so that you can make hierarchies out of it.
 
-The code, before compiled: (`test.nbc`)
+For example, we can have a Python dictionary; let's say it's just a 
+list of functions used by specific objects (actors) or other functional
+attributes and items of a network game, where each entry has a key
+name, and its value is a list of Instructions, which compiled string —
+`netbyte.Netbyte().compile(*instructions)` — can be transferred around
+with TCP, and stored into other people's function lists using
+`netbyte.Netbyte().read(binary_code)`, so that everyone knows what instructions
+to run if a certain function X is called on an object `MyObject`.
 
-    SETVAR "X" 0
-    SETVAR "i" 0
-    PRINTV "Testing...\n\n=======\n"
-
-    MKFUNC "ABCD" null \
-        {GSTVAR "X" (ADDNUM X (GETARG 0))} \
-        {PRINTV "Added" (GETARG 0) "to X! X is now:" X}
-        
-    MLABEL "Loop"
-    NULLEV (REPEAT 50 ABCD(20))
-    NULLEV (REPEAT 30 ABCD(100))
-    SETVAR "i" (ADDNUM i 1)
-    PRINTV (CONCAT "--- Iteration #" i) "Finished ---"
-    JUMPIF (LSRTHN X 10000) "Loop"
-    NULLEV (IFELSE (LSRTHN X 11000) {PRINTV X "is smaller than 11000."} {PRINTV X "is greater than or equal to 11000."})
-    RETURN X
-
-is equivalent to the Python code below:
-
-    def main():
-        x = 0
-        i = 0
-
-        def ABCD(y):
-            x += y
-            print("Added {} to X! X is now {}".format(y, x))
-
-        while x < 10000:
-            for _ in range(50):
-                ABCD(20)
-                
-            for _ in range(8):
-                ABCD(100)
-                
-            i += 1
-            print("--- Iteration #{} Finished ---".format(i))
-        
-        if x < 11000:
-            print(x, "is smaller than 11000.")
-            
-        else:
-            print(x, "is greater than or equal to 11000.")
-        
-        return x
-        
-    main()
-    
-which weights 536 bytes.
-    
-And its expression chaining, inspired by Lisp, is what makes this so flexible. See the
-code, especially that at `netbyte.py`, to learn more about the opcodes (Operation Codes) and
-expcodes (Expression Codes), and all the types too!
-
-It's not meant to be used as a direct language, but rather as an intermediary step for a higher
-level language, with a transpiler. Netbyte has this name because it was originally meant to be
-used in network applications, with network abstractions, as a Java-like language would. Now,
-it's a middle assembly language.
+For more examples, check the Programs folder.
 
 ## How to Use?
 
-You will need Python 3 to be able to use Netbyte. To compile, run:
+You will need Python 3 to be able to use Netbyte.
+
+To set up the Standard Library directory, run:
+
+    stdlibdir.bat
+
+To compile, run:
 
     python compile.py input.nbc [output.nbe]
     
 To execute, run:
 
-    python main.py input.nbe
+    python main.py input.nbe [arguments - see Stdlib/args.nbc or Programs/printfile.nbc]

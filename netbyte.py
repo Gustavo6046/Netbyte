@@ -3,11 +3,11 @@ import warnings
 import struct
 import re
 import math
+import os
 import sys
 import importlib
 
 from functools import reduce
-# from socket import socket, AF_INET, SOCK_STREAM, error as SocketError
 
 # Note that optional arguments default to None (Python) or NULLVL (Netbyte).
 
@@ -27,6 +27,7 @@ BASE_OPCODES = [
     "EXFILE", # Execute File
     "PRINTV", # Print Value
     "NULLEV", # Null Evaluation: for executing functions without printing their result!
+    "CATCHE", # Catch Error - run all instructions from 2nd and run 1st instruction on exception
 ]
 
 # Expression Types
@@ -40,6 +41,7 @@ TYPES = [
     "RTINST", # Instruction
     "BOOLTF", # Boolean True/False
     "VARRAY", # Value Array
+    "SPNULL", # Special Null
 ]
 
 # Expression Operators
@@ -49,13 +51,20 @@ EXPR_OPCODES = [
     "VTOSTR", # String Conversion : any -> string
     "GETARG", # Get function Argument from index : int -> any
     "REPEAT", # Repeat expression multiple times (for function calls)
-    "FNCALL", # Function Call : string (name), optional string (scope), 0+ anything -> anything
+    "FNCALL", # Function Call : string (name), optional string (scope), 0+ anything (args) -> anything
+    "FPCALL", # Function Pointer Call : function_pointer (func), 0+ anything (args) -> anything
     "IFELSE", # Ternary Operator : bool (condition), 2 anything -> anything
     "IFORNL", # Ternary Operator w/ Null : bool (condition), anything -> anything or null
-    "NFCALL", # Native Function Call : string (name), string (module), 0+ anything (no kwargs) -> anything
+    "NFCALL", # Native Function Call : string (name), optional string (module), 0+ anything (no kwargs) -> anything
+    "NPCALL", # Native Function Variable Call : py_function (function), 0+ anything (no kwargs) -> anything
     "CHRONO", # Time : optional double offset -> double Unix time
+    "EXECUT", # Execute given instructions and return null.
+    "PYATTR", # Get Python attribute from expression, e.g. (NPCALL (PYATTR "read" (NFCALL open "myFile.txt")))
+    "PYITEM", # Get Python item from expression, e.g. (PYITEM "argv" (PYMODL "sys"))
+    "PYMODL", # Import Python module
     
     # Comparison Operators
+    "ISSAME", # Equation : 2+ any -> bool
     "EQUALS", # Equation : 2+ any -> bool
     "DIFFER", # Differentiation : 2+ any -> bool
     "GTRTHN", # Greather Than : 2 numbers -> bool
@@ -87,6 +96,12 @@ EXPR_OPCODES = [
     "SPSCHR", # Char at Position : string, number -> string [length 1]
 ]
 
+class SpecialNull(object):
+    pass
+    
+    
+SPNULL = SpecialNull()
+
 def exvalue(expr, *args, **kwargs):
     return expr.__value__(*args, **kwargs)
         
@@ -96,6 +111,25 @@ def dbgvalue(expr):
 class Expression(object):
     def __value__(self):
         raise RuntimeError("Expression objects can't be used directly!")
+        
+class FunctionPointer(Expression):
+    def __init__(self, environment, fname, fscope=''):
+        self.environment = environment
+        self.fname = fname
+        self.fscope = fscope
+        
+    def __value__(self):
+        return self.environment.functions[self.fscope][self.fname]
+        
+    def __debug_value__(self):
+        return "[function pointer to {}::{}]".format(self.fscope, self.fname)
+        
+class NativeFunctionError(BaseException):
+    def __init__(self, msg):
+        self.msg = msg
+        
+    def __str__(self):
+        return self.msg
         
 class Operation(Expression):
     def __init__(self, environment, operator, *args, scope=None, function=None):
@@ -125,7 +159,13 @@ class Operation(Expression):
                 
             return res
             
-        operands = tuple(map(exvalue, self.operands))
+        try:
+            operands = tuple(map(exvalue, self.operands))
+            nospnul = tuple(filter(lambda x: x != SPNULL, operands))
+        
+        except BaseException:
+            # print(self.operator, self.operands)
+            raise
         
         # print(self.operator, "has operands", operands, "derived from", tuple(map(dbgvalue, self.operands)))
     
@@ -137,6 +177,18 @@ class Operation(Expression):
     
         if self.operator == "EQUALS":
             return len(set(operands)) < 2
+            
+        if self.operator == "ISSAME":
+            if len(operands) < 1:
+                return True
+        
+            a = operands[0]
+            
+            for o in operands[1:]:
+                if o is not a:
+                    return False
+                    
+            return True
             
         if self.operator == "DIFFER":
             return len(set(operands)) > 1
@@ -150,6 +202,12 @@ class Operation(Expression):
         if self.operator == "GTREQU":
             return operands[0] >= operands[1]
     
+        if self.operator == "PYITEM":
+            return operands[0][operands[1]]
+            
+        if self.operator == "PYMODL":
+            return importlib.import_module(operands[0])
+    
         if self.operator == "LSREQU":
             return operands[0] <= operands[1]
     
@@ -158,6 +216,16 @@ class Operation(Expression):
         
         if self.operator == "ADDNUM":
             return sum(operands)
+            
+        if self.operator == "EXECUT":
+            for i in operands:
+                if type(i) is Instruction:
+                    i.execute()
+                    
+                else:
+                    raise RuntimeError("EXECUT: {} is not an instruction!".format(dbgvalue(i)))
+        
+            return None
             
         if self.operator == "IFELSE":
             if operands[0]:
@@ -234,17 +302,50 @@ class Operation(Expression):
             return operands[0][operands[1]]
             
         if self.operator == "FNCALL":
-            return self.environment.functions[operands[1] if operands[1] is not None else ''][operands[0]].execute(*operands[2:])
+            return self.environment.functions[operands[1] if operands[1] is not None else ''][operands[0]].execute(*nospnul[2:])
+            
+        if self.operator == "FPCALL":
+            return operands[0].execute(*nospnul[1:])
             
         if self.operator == "GETARG":
             if self.function is None:
-                return 0
+                return SPNULL
                 
+            elif len(self.function._args) <= operands[0]:
+                return SPNULL
+            
             else:
                 return self.function._args[operands[0]]
             
         if self.operator == "NFCALL":
-            return getattr(importlib.import_module(operands[1]), operands[0])(operands[2:])
+            if operands[1] is None or len(operands) < 2:
+                if operands[0] in globals():
+                    return globals()[operands[0]](*nospnul[2:])
+                    
+                elif operands[0] in __builtins__:
+                    return __builtins__[operands[0]](*nospnul[2:])
+                    
+                else:
+                    raise NativeFunctionError("ERROR:NativeFunctionError:Native function not found in builtins nor globals: '{}'".format(operands[0]))
+        
+            else:
+                mod = importlib.import_module(operands[1])
+            
+                if hasattr(mod, operands[0]):
+                    return getattr(mod, operands[0])(*nospnul[2:])
+                    
+                else:
+                    raise NativeFunctionError("Native function not found in '{}' module: '{}'".format(operands[1], operands[0]))
+        
+        if self.operator == "NPCALL":
+            return operands[0](*nospnul[1:])
+        
+        if self.operator == "PYATTR":
+            if hasattr(operands[1], operands[0]):
+                return getattr(operands[1], operands[0], (operands[2] if len(operands) > 2 else None))
+                
+            else:
+                raise RuntimeError("PYATTR: no such attribute '{}' in {}!".format(operands[0], repr(operands[1])))
         
 class Literal(Expression):
     def __init__(self, environment, value):
@@ -258,7 +359,7 @@ class Literal(Expression):
         return repr(self.value)
 
     def __debug_value__(self):
-        return self.value
+        return "[ {} ]".format(repr(self.value))
         
     def __value__(self):
         return self.value
@@ -331,6 +432,7 @@ class Instruction(object):
         
     def execute(self):
         arguments = tuple(map(exvalue, self.arguments))
+        nospnul = tuple(filter(lambda x: x != SPNULL, arguments))
         
         # print(self.opcode, "has arguments", arguments, "derived from", tuple(map(dbgvalue, self.arguments)))
     
@@ -427,15 +529,38 @@ class Instruction(object):
         elif self.opcode == "NULLEV":
             return # we already evaluated the arguments anyway :P
             
+        elif self.opcode == "CATCHE":
+            for a in operands[1:]:
+                if type(a) is Instruction:
+                    try:
+                        a.execute()
+                        
+                    except BaseException:
+                        operands[0].execute()
+                        break
+                    
+                else:
+                    raise RuntimeError("Non-instruction given to CATCHE.")
+            
     def __value__(self):
         return self
+        
+class PreprocessingError(BaseException):
+    def __init__(self, msg):
+        self.msg = msg
+        
+    def __str__(self):
+        return self.msg
         
 class VersionCheckError(BaseException):
     def __init__(self, msg):
         self.msg = msg
         
+    def __str__(self):
+        return self.msg
+        
 class Netbyte(object):
-    VERSION = "0.0.7"
+    VERSION = "0.1.0"
 
     def __init__(self, print_stream=sys.stdout):
         self.variables = {}
@@ -462,6 +587,10 @@ class Netbyte(object):
         if ltype == "NULLVL":
             # print(">", ltype, length, superlen, "@", hex(absolute_pos))
             return Literal(self, None)
+            
+        if ltype == "SPNULL":
+            # print(">", ltype, length, superlen, "@", hex(absolute_pos))
+            return Literal(self, SPNULL)
             
         elif ltype == "ITNUMS":
             fmts = {
@@ -642,7 +771,8 @@ class Netbyte(object):
             res = struct.pack("=LBLB", len(r) + 6, 0, len(r) + 1, TYPES.index("RTINST")) + r
             
             if debug: 
-                print(" . " * level, len(r) + 5, res.hex())
+                pass
+                # print(" . " * level, len(r) + 5, res.hex())
                 
             return res
             
@@ -696,18 +826,29 @@ class Netbyte(object):
                 res += struct.pack('=B', TYPES.index('DBLNUM'))
                 res += r
                 
+            elif exp.value is SPNULL:
+                res = struct.pack('=LBLB', 6, 0, 1, TYPES.index("SPNULL"))
+                
+                if debug:
+                    pass
+                    # print(" . " * level, res.hex())
+                    
+                return res
+                
             else:
                 res = struct.pack('=LBLB', 6, 0, 1, TYPES.index('NULLVL'))
                 
                 if debug: 
-                    print(" . " * level, res.hex())
+                    pass
+                    # print(" . " * level, res.hex())
                 
                 return res
         
         res = struct.pack("=L", len(res)) + res
         
         if debug: 
-            print(" . " * level, res.hex())
+            pass
+            # print(" . " * level, res.hex())
                 
         return res
         
@@ -865,6 +1006,9 @@ class Netbyte(object):
             elif argument.upper() in ("NULL", "NONE"):
                 return Literal(self, None)
                 
+            elif argument.upper() == "SPNULL":
+                return Literal(self, SPNULL)
+                
             elif argument.upper() == "TRUE":
                 return Literal(self, True)
                 
@@ -888,33 +1032,76 @@ class Netbyte(object):
             elif argument.startswith('0b') and len(filter(lambda x: x in '01', argument[2:])) == len(argument) - 2:
                 return Literal(self, int(argument[2:], 2))
                 
+            elif argument.startswith('@'):
+                return FunctionPointer(self, argument[1:])
+                
+            elif argument.startswith('%'):
+                return Operation(self, "GETARG", Literal(self, int(argument[1:])))
+                
             else:
                 return Operation(self, "GETVAR", Literal(self, argument), Literal(self, None))
                     
         return Literal(self, None)
                     
-    def parse(self, assembly, name=None):
+    def parse(self, assembly, name=None, included=None):
+        if included is None:
+            included = []
+    
         instructions = []
         assembly = re.sub(r'//[^\n]+', '', assembly)
         assembly = re.sub(r' +', ' ', assembly)
     
         for l in re.split(r'(?<!\\)\n', assembly):
-            l = l.replace('\\\n', ' ')
-            l = l.strip(' ')
-        
-            if re.sub(r'^\s+$', '', l) == '':
-                continue
-        
-            opcode = l.split(' ')[0]
+            if l.startswith("#"):
+                command = l[1:]
+                op = command.split(' ')[0].upper()
+                args = command.split(' ')[1:]
+                
+                if op == "INCLUDE":
+                    if len(args) > 0:
+                        fn = ' '.join(args)
+                        
+                        if os.path.isfile(fn) and os.path.abspath(fn) not in included:
+                            included.append(os.path.abspath(fn))
+                            instructions.extend(self.parse_file(fn, included))
+                            
+                        else:
+                            raise PreprocessingError("#INCLUDE file not found: '{}'. Try not enclosing it in \"quotes\" or <angled brackets/chevrons>.".format(fn))
+                    
+                    else:
+                        raise PreprocessingError("#INCLUDE command needs a file path. E.g. \"#INCLUDE my module.nbc\"")
+                        
+                elif op == "STDINCLUDE":
+                    if len(args) > 0:
+                        fn = os.path.join(os.environ["NETBYTE_FOLDER"], 'Stdlib', ' '.join(args) + '.nbc')
+                        
+                        if os.path.isfile(fn) and os.path.abspath(fn) not in included:
+                            included.append(os.path.abspath(fn))
+                            instructions.extend(self.parse_file(fn, included))
+                            
+                        else:
+                            raise PreprocessingError("#STDINCLUDE module not found: '{}'. Try not enclosing it in \"quotes\" or <angled brackets/chevrons>.".format(fn))
+                    
+                    else:
+                        raise PreprocessingError("#STDINCLUDE needs a module. E.g. \"#STDINCLUDE file\"")
+                
+            else:
+                l = l.replace('\\\n', ' ')
+                l = l.strip(' ')
             
-            if opcode.upper() not in BASE_OPCODES:
-                warnings.warn("Code @ '{}': {} is not a valid opcode!".format(name, opcode))
+                if re.sub(r'^\s+$', '', l) == '':
+                    continue
             
-            arguments = tuple(map(self.parse_arg, filter(lambda x: len(x) > 0, self.argument_tree(' '.join(l.split(' ')[1:])))))
-            # print(arguments)
-            instructions.append(Instruction(self, None, opcode.upper(), *arguments))
+                opcode = l.split(' ')[0]
+                
+                if opcode.upper() not in BASE_OPCODES:
+                    warnings.warn("Code @ '{}': {} is not a valid opcode!".format(name, opcode))
+                
+                arguments = tuple(map(self.parse_arg, filter(lambda x: len(x) > 0, self.argument_tree(' '.join(l.split(' ')[1:])))))
+                # print(arguments)
+                instructions.append(Instruction(self, None, opcode.upper(), *arguments))
         
         return instructions
         
-    def parse_file(self, filename):
-        return self.parse(open(filename).read(), filename)
+    def parse_file(self, filename, included=None):
+        return self.parse(open(filename).read(), filename, included)

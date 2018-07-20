@@ -1,0 +1,8 @@
+MKFUNC "open" "file" \
+    {RETURN (NFCALL "open" null %0 (IFELSE (EQUALS %1 SPNULL) "r" %1))}
+    
+MKFUNC "binread" "file" \
+    {RETURN (NPCALL (PYATTR "encode" (NPCALL (PYATTR "read" %0) %2)) (IFELSE (EQUALS %1 SPNULL) "utf-8" %1))}
+    
+MKFUNC "read" "file" \
+    {RETURN (NPCALL (PYATTR "read" %0) %1)}

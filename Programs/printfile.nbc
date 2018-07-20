@@ -1,0 +1,4 @@
+#STDINCLUDE args
+#STDINCLUDE file
+
+PRINTV file::read(file::open(args::arg(0)))

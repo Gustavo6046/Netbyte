@@ -1,0 +1,5 @@
+#SEMICOLONS
+#STDINCLUDE io
+
+SETVAR "myString" "Hello World!\rDank\n";
+NULLEV io::stdout(myString);

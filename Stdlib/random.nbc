@@ -1,0 +1,10 @@
+#SEMICOLONS
+
+MKFUNC "uniform" "random"
+    {RETURN (NPCALL (PYATTR "uniform" (PYMODL "random")) %0 %1)};
+    
+MKFUNC "integer" "random"
+    {RETURN (NPCALL (PYATTR "randint" (PYMODL "random")) %0 %1)};
+    
+MKFUNC "unit" "random"
+    {RETURN (NPCALL (PYATTR "random" (PYMODL "random")))};

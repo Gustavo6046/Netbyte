@@ -1,0 +1,16 @@
+SETVAR "X" 0
+SETVAR "i" 0
+PRINTV "Testing...\n\n=======\n"
+
+MKFUNC "ABCD" null \
+    {GSTVAR "X" (ADDNUM &::X (GETARG 0))} \ // & is the global scope.
+    {PRINTV "Added" (GETARG 0) "to X! X is now:" &::X}
+    
+MLABEL "Loop"
+NULLEV (REPEAT 50 ABCD(20))
+NULLEV (REPEAT 8 ABCD(100))
+SETVAR "i" (ADDNUM i 1)
+PRINTV (CONCAT "--- Iteration #" (VTOSTR i)) "Finished ---"
+JUMPIF (LSRTHN X 10000) "Loop"
+NULLEV (IFELSE (LSRTHN X 50000) {PRINTV "X is smaller than 50000."} {PRINTV "X is greater than or equal to 50000."})
+RETURN X

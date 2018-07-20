@@ -1,0 +1,7 @@
+#SEMICOLONS
+
+MKFUNC "sleep" "time"
+    {NULLEV (NPCALL (PYATTR "sleep" (PYMODL "time")) %0)};
+    
+MKFUNC "now" "time"
+    {RETURN (NPCALL (PYATTR "time" (PYMODL "time")) %0)};

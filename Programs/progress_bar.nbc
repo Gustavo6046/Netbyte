@@ -1,0 +1,20 @@
+#SEMICOLONS
+#STDINCLUDE io
+#STDINCLUDE time
+#STDINCLUDE random
+
+SETVAR "max" 1000;
+SETVAR "prog" 0;
+
+MLABEL "printbar";
+
+SETVAR "prog" (MINNUM max (ADDNUM prog random::uniform(0.45 1.5)));
+NULLEV io::stdout((CONCAT "\r" (SSLICE (VTOSTR (DIVNUM (MULNUM 100 prog) max)) 0 7) "%  ["));
+NULLEV (REPEAT (ROUNDN (MULNUM 30 (DIVNUM prog max))) io::stdout("#"));
+NULLEV (REPEAT (ROUNDN (SUBNUM 30 (MULNUM 30 (DIVNUM prog max)))) io::stdout("."));
+NULLEV io::stdout("]    ");
+NULLEV time::sleep(0.01);
+
+JUMPIF (LSRTHN prog max) "printbar";
+
+NULLEV io::stdout("\nFinished the demonstrative progress bar. :)\n");

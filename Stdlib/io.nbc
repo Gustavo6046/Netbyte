@@ -1,0 +1,10 @@
+#SEMICOLONS
+
+MKFUNC "stdout" "io"
+    {RETURN (NPCALL (PYATTR "write" (PYATTR "stdout" (PYMODL "sys"))) %0)};
+    
+MKFUNC "stderr" "io"
+    {RETURN (NPCALL (PYATTR "write" (PYATTR "stderr" (PYMODL "sys"))) %0)};
+    
+MKFUNC "input" "io"
+    {RETURN (NFCALL "input")};

@@ -28,6 +28,7 @@ BASE_OPCODES = [
     "PRINTV", # Print Value
     "NULLEV", # Null Evaluation: for executing functions without printing their result!
     "CATCHE", # Catch Error - run all instructions from 2nd and run 1st instruction on exception
+    "JMPOFF", # Jump Offset - X statements into the future.
 ]
 
 # Expression Types
@@ -85,6 +86,8 @@ EXPR_OPCODES = [
     "LOGNOT", # Logic NOT : bool -> bool
     
     # Numeric Operators
+    "MAXNUM", # Largest
+    "MINNUM", # Smallest
     "ADDNUM", # Addition : 2+ numbers -> number
     "SUBNUM", # Subtraction : 2 numbers -> number
     "MULNUM", # Multiplication : 2+ numbers -> number
@@ -96,6 +99,7 @@ EXPR_OPCODES = [
     "IORNUM", # Bitwise OR : 2+ numbers -> number
     "XORNUM", # Bitwise XOR : 2+ numbers -> number
     "NOTNUM", # Bitwise NOT : 2+ numbers -> number
+    "ROUNDN", # Round Number
     
     # String Operators
     "SSLICE", # String Slice : string, 2 numbers -> string
@@ -281,6 +285,12 @@ class Operation(Expression):
         if self.operator == "ADDNUM":
             return sum(operands)
             
+        if self.operator == "MAXNUM":
+            return max(operands)
+            
+        if self.operator == "MINNUM":
+            return min(operands)
+            
         if self.operator == "EXECUT":
             for i in operands:
                 if type(i) is Instruction:
@@ -331,6 +341,9 @@ class Operation(Expression):
             
         if self.operator == "NOTNUM":
             return ~operands[0]
+            
+        if self.operator == "ROUNDN":
+            return int(operands[0])
             
         if self.operator == "LOGAND":
             return reduce(lambda a, b: a and b, operands)
@@ -485,13 +498,16 @@ class Function(object):
                 elif status[:5] == "JUMP:":
                     pos = int(status[5:])
                     
+                elif status[:6] == "OJUMP:":
+                    pos += int(status[5:])
+                    
                 elif status[:6] == "LJUMP:":
                     pos = labels[status[6:]]
                     
                 elif status[:6] == "LABEL:":
                     labels[status[6:]] = pos + 1
-                    
-            if status is None or (status[:5] != "JUMP:" and status[:6] != "LJUMP:"):
+                
+            if status is None or (status[:5] != "JUMP:" and status[:6] != "LJUMP:" and status[:6] != "OJUMP:"):
                 pos += 1
                 
         return res
@@ -598,6 +614,9 @@ class Instruction(object):
         elif self.opcode == "MLABEL":
             return "LABEL:{}:{}".format(self.scope, arguments[0])
             
+        elif self.opcode == "JMPOFF":
+            return "OJUMP:" + str(arguments[0])
+            
         elif self.opcode == "JUMPLB":
             return "LJUMP:{}:".format(self.scope) + arguments[0]
             
@@ -645,10 +664,14 @@ class VersionCheckError(BaseException):
         return self.msg
         
 class Netbyte(object):
-    VERSION = "0.1.2"
+    VERSION = "0.1.3"
 
     def __init__(self, print_stream=sys.stdout):
-        self.variables = {}
+        self.variables = {
+            "": {
+                "__NETBYTE__": self
+            }
+        }
         self.functions = {}
         self.return_stack = {}
         self.files = []
@@ -832,13 +855,16 @@ class Netbyte(object):
                 elif status[:5] == "JUMP:":
                     pos = int(status[5:])
                     
+                elif status[:6] == "OJUMP:":
+                    pos += int(status[5:])
+                    
                 elif status[:6] == "LJUMP:":
                     pos = labels[status[6:]]
                     
                 elif status[:6] == "LABEL:":
                     labels[status[6:]] = pos + 1
                 
-            if status is None or (status[:5] != "JUMP:" and status[:6] != "LJUMP:"):
+            if status is None or (status[:5] != "JUMP:" and status[:6] != "LJUMP:" and status[:6] != "OJUMP:"):
                 pos += 1
                 
         return res
@@ -964,18 +990,22 @@ class Netbyte(object):
         level = -1
         res = ""
         done = False
+        quoted = False
         
         for char in line:
             res += char
             
-            if char in "])}":
+            if char in '"\'':
+                quoted = not quoted
+            
+            if char in "])}" and not quoted:
                 level -= 1
                 # print(level, char, res)
                 
             if level > -1:
                 done = True    
             
-            if char in "[({":
+            if char in "[({" and not quoted:
                 level += 1
                 # print(level, char, res)
                      
@@ -994,7 +1024,7 @@ class Netbyte(object):
         while len(remaining) > 0:
             char = remaining[0]
             
-            if char == '"':
+            if char in '"\'':
                 quoted = not quoted
             
             if char in "[{(":
@@ -1021,9 +1051,15 @@ class Netbyte(object):
         
     def parse_arg(self, argument):
         if type(argument) is str:
-            if len(argument) > 1 and argument[0] == '"' and argument[-1] == '"':
-                return Literal(self, argument[1:-1]
+            if len(argument) > 1 and argument[0] in '"\'' and argument[-1] == argument[0]:
+                argument = argument[1:-1]
+            
+                for i in range(256):
+                    argument = argument.replace(r'\x{}{}'.format((0 if i < 16 else ''), hex(i)[2:]), chr(i))
+            
+                return Literal(self, argument
                     .replace(r'\n', '\n')
+                    .replace(r'\r', '\r')
                     .replace(r'\"', '"')
                     .replace(r'\'', "'")
                     .replace('\\\\', '\\')
@@ -1170,7 +1206,10 @@ class Netbyte(object):
         assembly = re.sub(r'//[^\n]+', '', assembly)
         assembly = re.sub(r' +', ' ', assembly)
         assembly = re.sub(r' ?/\*[\n.]*?\*/ ?', '', assembly, flags=re.S)
+        _asm = assembly
         assembly = re.sub(r'\\\s*?\n', '', assembly)
+    
+        semicolons = False
     
         for l in assembly.splitlines():
             if l.startswith("#"):
@@ -1178,7 +1217,10 @@ class Netbyte(object):
                 op = command.split(' ')[0].upper()
                 args = command.split(' ')[1:]
                 
-                if op == "INCLUDE":
+                if op == "SEMICOLONS":
+                    semicolons = True
+                
+                elif op == "INCLUDE":
                     if len(args) > 0:
                         fn = ' '.join(args)
                         
@@ -1206,9 +1248,33 @@ class Netbyte(object):
                     else:
                         raise PreprocessingError("#STDINCLUDE needs a module. E.g. \"#STDINCLUDE file\"")
                 
-            else:
+            elif not semicolons:
                 l = l.replace('\\\n', ' ')
                 l = l.strip(' ')
+            
+                if re.sub(r'^\s+$', '', l) == '':
+                    continue
+            
+                opcode = l.split(' ')[0]
+                
+                if opcode.upper() not in BASE_OPCODES:
+                    warnings.warn("Code @ '{}': {} is not a valid opcode!".format(name, opcode))
+                
+                arguments = tuple(map(self.parse_arg, filter(lambda x: len(x) > 0, self.argument_tree(' '.join(l.split(' ')[1:])))))
+                # print(arguments)
+                instructions.append(Instruction(self, None, opcode.upper(), *arguments))
+        
+        if semicolons:
+            lines = []
+            
+            for l in _asm.splitlines():
+                if not l.lstrip(' \t').startswith("#"):
+                    lines.append(l)
+                    
+            _asm = '\n'.join(lines)
+        
+            for l in re.split(r'(?<!\\);', _asm):
+                l = re.sub('\s+', ' ', l.replace('\n', ' ').strip(' '))
             
                 if re.sub(r'^\s+$', '', l) == '':
                     continue

@@ -16,12 +16,12 @@ BASE_OPCODES = [
     "SETVAR", # Set Variable : string name, string scope, any value
     "GSTVAR", # Global Set Variable : string name, any value
     "DELVAR", # Delete Variable : string name
-    "MKFUNC", # Make Function : string name, byte string expressions, optional string scope
+    "MKFUNC", # Make Function : string name, optional string scope, 0+ instruction body
     "RETURN", # Set return value
     "TERMIN", # Terminate
     "JUMPIF", # Jump If instruction, with condition and position...
     "JUMPIN", # Jump If Not instruction, with condition and position...
-    "JUMPTO", # Jump To instruction at position...
+    # "JUMPTO", # Jump To instruction at position...
     "JUMPLB", # Jump to Label
     "MLABEL", # Mark Label
     "EXFILE", # Execute File
@@ -29,6 +29,7 @@ BASE_OPCODES = [
     "NULLEV", # Null Evaluation: for executing functions without printing their result!
     "CATCHE", # Catch Error - run all instructions from 2nd and run 1st instruction on exception
     "JMPOFF", # Jump Offset - X statements into the future.
+    "GJUMPL", # Global Jump to Label
 ]
 
 # Expression Types
@@ -43,18 +44,22 @@ TYPES = [
     "BOOLTF", # Boolean True/False
     "VARRAY", # Value Array
     "SPNULL", # Special Null
+    "FUNCTN", # Function
+    "FUNCPT", # Function Pointer
 ]
 
 # Expression Operators
 EXPR_OPCODES = [
     # Generic Operators
     "FORALL", # Iterate on List or Dict
+    "MKFNCP", # Make Function Pointer : string name, optional string scope -> function pointer
+    "MKFNCL", # Make Function Literal : string name, optional string scope, 1+ instruction body -> function literal
     "GETVAR", # Retrieve Variable : string name, string scope -> any
     "VTOSTR", # String Conversion : any -> string
     "GETARG", # Get function Argument from index : int -> any
     "REPEAT", # Repeat expression multiple times (for function calls)
     "FNCALL", # Function Call : string (name), optional string (scope), 0+ anything (args) -> anything
-    "FPCALL", # Function Pointer Call : function_pointer (func), 0+ anything (args) -> anything
+    "FPCALL", # Function Pointer Call : function pointer or literal (func), 0+ anything (args) -> anything
     "IFELSE", # Ternary Operator : bool (condition), 2 anything -> anything
     "IFORNL", # Ternary Operator w/ Null : bool (condition), anything -> anything or null
     "NFCALL", # Native Function Call : string (name), optional string (module), 0+ anything (no kwargs) -> anything
@@ -62,7 +67,8 @@ EXPR_OPCODES = [
     "CHRONO", # Time : optional double offset -> double Unix time
     "EXECUT", # Execute given instructions and return null.
     "PYATTR", # Get Python attribute from expression, e.g. (NPCALL (PYATTR "read" (NFCALL open "myFile.txt")))
-    "PYGITM", # Get Python item from expression, e.g. (PYGITM "argv" (PYMODL "sys"))
+    "PYGITM", # Get Python item from expression, e.g. (PYGITM 1 (PYATTR (PYMODL "os") "environ")) os.environ[1]
+    "PYHITM", # Get existence of Python item, e.g. (PYHITM 1 (PYATTR (PYMODL "os") "environ")) -> 1 in os.environ
     "PYSITM", # Set Python item to expression.
     "PYMODL", # Import Python module
     "FNCARG", # Function Call (apply Arguments)
@@ -99,6 +105,8 @@ EXPR_OPCODES = [
     "IORNUM", # Bitwise OR : 2+ numbers -> number
     "XORNUM", # Bitwise XOR : 2+ numbers -> number
     "NOTNUM", # Bitwise NOT : 2+ numbers -> number
+    "LFTNUM", # Left Shift : 2 numbers -> number
+    "RGHNUM", # Right Shift : 2 numbers -> number
     "ROUNDN", # Round Number
     
     # String Operators
@@ -133,7 +141,7 @@ class FunctionPointer(Expression):
         return self.environment.functions[self.fscope][self.fname]
         
     def __debug_value__(self):
-        return "[function pointer to {}::{}]".format(self.fscope, self.fname)
+        return "[pointer {}::{}]".format(self.fscope, self.fname)
         
 class NativeFunctionError(BaseException):
     def __init__(self, msg):
@@ -194,7 +202,7 @@ class Operation(Expression):
             # print(self.operator, self.operands)
             raise
         
-        # print(self.operator, "has operands", operands, "derived from", tuple(map(dbgvalue, self.operands)))
+        # print(self.operator, "has operands", operands, "derived from", tuple(map(dbgvalue, self.operands)))420
     
         if self.operator == "VTOSTR":
             return str(operands[0])
@@ -268,6 +276,9 @@ class Operation(Expression):
     
         if self.operator == "PYGITM":
             return operands[0][operands[1]]
+     
+        if self.operator == "PYHITM":
+            return operands[1] in operands[0]
             
         if self.operator == "PYSITM":
             operands[0][operands[1]] = operands[2]
@@ -342,6 +353,12 @@ class Operation(Expression):
         if self.operator == "NOTNUM":
             return ~operands[0]
             
+        if self.operator == "LFTNUM":
+            return operands[0] << operands[1]
+            
+        if self.operator == "RGHNUM":
+            return operands[0] >> operands[1]
+            
         if self.operator == "ROUNDN":
             return int(operands[0])
             
@@ -362,6 +379,37 @@ class Operation(Expression):
             
         if self.operator == "CONCAT":
             return reduce(lambda a, b: "{}{}".format(str(a), str(b)), operands, '')
+            
+        if self.operator == "MKFNCP":
+            sc = (operands[1] if len(operands) > 1 and operands[1] is not None else (self.scope if self.scope is not None else ''))
+            return FunctionPointer(self, operands[0], sc)
+            
+        if self.operator == "MKFNCL":
+            name = operands[0]
+            scope = (operands[1] if len(operands) > 1 and operands[1] is not None else (self.scope if self.scope is not None else ''))
+            body = operands[2:]
+            
+            f = Function(self.environment, scope, name, *body)
+            
+            def set_function(ioo):
+                if type(ioo) is Operation:
+                    ioo.scope = f.scope or ioo.scope
+                    ioo.function = (ioo.function if ioo.function is not None else f)
+                
+                    for o in ioo.operands:
+                        set_function(o)
+                        
+                elif type(ioo) is Instruction:
+                    ioo.scope = f.scope or ioo.scope
+                    ioo.function = (ioo.function if ioo.function is not None else f)
+                
+                    for o in ioo.arguments:
+                        set_function(o)
+                
+            for i in body:
+                set_function(i)
+            
+            return f
             
         if self.operator == "SPSCHR":
             return operands[0][operands[1]]
@@ -392,7 +440,7 @@ class Operation(Expression):
                 return self.function._args[operands[0]]
             
         if self.operator == "NFCALL":
-            if operands[1] is None or len(operands) < 2:
+            if len(operands) < 2 or operands[1] is None:
                 if operands[0] in globals():
                     return globals()[operands[0]](*nospnul[2:])
                     
@@ -479,9 +527,21 @@ class Function(object):
         
     def execute(self, *args):
         res = None
-        labels = {}
+        labels = self.environment._labels
         pos = 0
         self._args = args
+        
+        # Static Labels
+        for i in self.instructions:
+            if i.opcode == "MLABEL":
+                status = i.execute()
+                
+                if status[:6] == "LABEL:":
+                    labels[status[6:]] = pos + 1
+            
+            pos += 1
+            
+        pos = 0
         
         while pos < len(self.instructions):
             i = self.instructions[pos]
@@ -504,6 +564,7 @@ class Function(object):
                 elif status[:6] == "LJUMP:":
                     pos = labels[status[6:]]
                     
+                # Dynamic Labels
                 elif status[:6] == "LABEL:":
                     labels[status[6:]] = pos + 1
                 
@@ -532,7 +593,7 @@ class Instruction(object):
     def execute(self):
         arguments = tuple(map(exvalue, self.arguments))
         nospnul = tuple(filter(lambda x: x != SPNULL, arguments))
-        
+
         # print(self.opcode, "has arguments", arguments, "derived from", tuple(map(dbgvalue, self.arguments)))
     
         if self.opcode == 'SETVAR':
@@ -612,13 +673,16 @@ class Instruction(object):
             return "JUMP:" + str(arguments[0])
             
         elif self.opcode == "MLABEL":
-            return "LABEL:{}:{}".format(self.scope, arguments[0])
+            return "LABEL:{}:{}".format((self.scope if self.scope is not None else ''), arguments[0])
             
         elif self.opcode == "JMPOFF":
             return "OJUMP:" + str(arguments[0])
             
         elif self.opcode == "JUMPLB":
-            return "LJUMP:{}:".format(self.scope) + arguments[0]
+            return "LJUMP:{}:".format(arguments[1] if len(arguments) > 1 else (self.scope if self.scope is not None else "")) + arguments[0]
+            
+        elif self.opcode == "GJUMPL":
+            self.environment._global_jump("{}:{}".format(arguments[1] if len(arguments) > 1 else self.scope, arguments[0]))
             
         elif self.opcode == "EXFILE":
             self.environment.execute(open(self.arguments[0], 'rb').read())
@@ -664,7 +728,7 @@ class VersionCheckError(BaseException):
         return self.msg
         
 class Netbyte(object):
-    VERSION = "0.1.4"
+    VERSION = "0.1.5"
 
     def __init__(self, print_stream=sys.stdout):
         self.variables = {
@@ -677,11 +741,15 @@ class Netbyte(object):
         self.files = []
         self.pstream = print_stream
         self.last_return = None
+        self._labels = {}
         
     def _get_str(self, data, pos):
         length = struct.unpack("=I", data[pos: pos + 4])[0]
         sd = data[pos + 4: pos + 4 + length]
-        return sd.decode('utf-8')
+        return sd.decode('utf-8'), length
+        
+    def _dump_str(self, string):
+        return struct.pack("=L{}s".format(len(string)), len(string), string)
         
     def read_literal(self, data, pos, scope=None, absolute_pos=None, superlen=None):
         if absolute_pos is None:
@@ -696,9 +764,44 @@ class Netbyte(object):
             # print(">", ltype, length, superlen, "@", hex(absolute_pos))
             return Literal(self, None)
             
-        if ltype == "SPNULL":
+        elif ltype == "SPNULL":
             # print(">", ltype, length, superlen, "@", hex(absolute_pos))
             return Literal(self, SPNULL)
+            
+        elif ltype == "FUNCTN":
+            apos = absolute_pos
+        
+            name, nl = _get_str(sd, 0)
+            apos += nl
+            sd = sd[nl:]
+            scope, sl = _get_str(sd, 0)
+            apos += sl
+            sd = sd[sl:]
+            
+            blen = struct.unpack("=L", sd[:4])
+            instructions = []
+            apos += 4
+            sd = sd[4:]
+            
+            while len(sd) > 0:
+                i, l = self.read_instruction(sd, 0, scope, apos)
+                instructions.push(i)
+                apos += l
+                sd = sd[l:]
+            
+            return Literal(self, Function(self, scope, name, *instructions))
+               
+        elif ltype == "FUNCPN":
+            apos = absolute_pos
+        
+            name, nl = _get_str(sd, 0)
+            apos += nl
+            sd = sd[nl:]
+            scope, sl = _get_str(sd, 0)
+            apos += sl
+            sd = sd[sl:]
+            
+            return FunctionPointer(self, name, scope)
             
         elif ltype == "ITNUMS":
             fmts = {
@@ -833,15 +936,29 @@ class Netbyte(object):
             
         return instructions
         
+    def _global_jump(self, lb):
+        self.pos = self._labels[lb] - 1
+        
     def execute(self, data, name=None):
         instructions = self.read(data, name)
+        pos = 0
         
         res = None
-        pos = 0
-        labels = {}
         
-        while pos < len(instructions):
-            i = instructions[pos]
+        # Static Labels
+        for i in instructions:        
+            if i.opcode == "MLABEL":
+                status = i.execute()
+                
+                if status[:6] == "LABEL:":
+                    self._labels[status[6:]] = pos + 1
+                
+            pos += 1
+            
+        self.pos = 0
+            
+        while self.pos < len(instructions):
+            i = instructions[self.pos]
             status = i.execute()
             
             if status is not None:
@@ -853,19 +970,19 @@ class Netbyte(object):
                     break
                     
                 elif status[:5] == "JUMP:":
-                    pos = int(status[5:])
+                    self.pos = int(status[5:])
                     
                 elif status[:6] == "OJUMP:":
-                    pos += int(status[5:])
+                    self.pos += int(status[5:])
                     
                 elif status[:6] == "LJUMP:":
-                    pos = labels[status[6:]]
+                    self.pos = self._labels[status[6:]]
                     
                 elif status[:6] == "LABEL:":
-                    labels[status[6:]] = pos + 1
+                    self._labels[status[6:]] = self.pos + 1
                 
             if status is None or (status[:5] != "JUMP:" and status[:6] != "LJUMP:" and status[:6] != "OJUMP:"):
-                pos += 1
+                self.pos += 1
                 
         return res
 
@@ -895,6 +1012,10 @@ class Netbyte(object):
             # ores = struct.pack("=L", len(ores)) + ores
             res += ores
             
+        elif type(exp) is FunctionPointer:
+            ares = self._dump_str(exp.fname) + self._dump_str(exp.fscope)
+            return b'\x00' + struct.pack("=LB", len(ares) + 1, TYPES.index("FUNCPT")) + ares
+        
         elif type(exp) is Literal:
             res = b'\x00'
         
@@ -909,6 +1030,16 @@ class Netbyte(object):
                     ares += self.dump_expression(i)
             
                 res += struct.pack("=LB", len(ares) + 1, TYPES.index('VARRAY')) + ares
+                
+            elif type(exp.value) is Function:
+                body = b''
+                
+                for i in exp.value.instructions:
+                    ins = self.dump(i, debug=debug, level=level + 1)
+                    body += struct.pack("=L", len(ins)) + ins
+            
+                ares = self._dump_str(exp.value.name) + self._dump_str(exp.value.scope) + struct.pack("=L", len(body)) + body
+                res += struct.pack("=LB", len(ares) + 1, TYPES.index("FUNCTN"), ares)
                 
             elif type(exp.value) is bool:
                 res += struct.pack("=LB?", 2, TYPES.index("BOOLTF"), exp.value)
@@ -1065,6 +1196,22 @@ class Netbyte(object):
                     .replace('\\\\', '\\')
                 )
             
+            elif argument[0] == "*": # dynamic function call
+                argument = argument[1:]
+                d = self.parenthetic_parse(argument)
+                a = self.argument_tree(d[1:-1])
+                func = a[0]
+                args = a[1:]
+                
+                if len(args) == 0:
+                    args = ()
+                
+                else:
+                    args = tuple(map(self.parse_arg, filter(lambda x: len(x) > 0, args)))
+                    
+                res = Operation(self, "FPCALL", self.parse_arg(func), *args)
+                return res
+            
             elif '(' in argument and argument[0] != '(' and argument[-1] == ')':
                 scope = ''
                 name = ''
@@ -1085,7 +1232,9 @@ class Netbyte(object):
                     args = ()
                 
                 else:
-                    args = tuple(map(self.parse_arg, filter(lambda x: len(x) > 0, self.argument_tree(self.parenthetic_parse(argument[1:-1].strip(' '))))))
+                    args = tuple(map(self.parse_arg,
+                        filter(lambda x: len(x) > 0, self.argument_tree(argument[1:-1].strip(' ')))
+                    ))
                     
                 return Operation(self, "FNCALL", Literal(self, name), Literal(self, scope), *args)
             

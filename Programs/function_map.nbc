@@ -1,0 +1,41 @@
+#SEMICOLONS
+#STDINCLUDE map
+#STDINCLUDE io
+
+SETVAR "crates" 0;
+SETVAR "goals" 0;
+
+SETVAR "funcMap" map::map(
+    "makeGoal" (MKFNCL "makeGoal" ""
+        {SETVAR "goals" (ADDNUM ::goals 1) ""}
+        {PRINTV "GOOOOOOOOOOOOOOOOOAL!"}
+        {RETURN ::goals})
+        
+    "anotherCrate" (MKFNCL "makeGoal" ""
+        {SETVAR "crates" (ADDNUM ::crates 1) ""}
+        {PRINTV "One more crate was added. Now there are" ::crates "crates!"}
+        {RETURN ::crates})
+);
+PRINTV funcMap;
+
+MKFUNC "badfunc" ""
+    {PRINTV "Bad function name!"}
+    {PRINTV}
+    {PRINTV funcMap}
+    {PRINTV}
+    {GJUMPL "inputLoop"};
+    
+MLABEL "inputLoop";
+
+NULLEV io::stdout("Pick a function name:\n: ");
+SETVAR "f" io::input();
+NULLEV (IFELSE
+    (LOGIOR (EQUALS f "") (EQUALS f "none"))
+    {TERMIN}
+);
+NULLEV (IFELSE
+    (LOGNOT map::has(::funcMap f))
+    badfunc()
+);
+PRINTV *(map::get(funcMap f null));
+JUMPLB "inputLoop";

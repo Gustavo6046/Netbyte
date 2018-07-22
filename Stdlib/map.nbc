@@ -23,6 +23,9 @@ MKFUNC "set" "map" \
 MKFUNC "get" "map" \ // more of a shortcut really
     {RETURN (PYGITM %0 %1 %2)}
     
+MKFUNC "has" "map" \
+    {RETURN (PYHITM %0 %1 %2)}
+    
 MKFUNC "remove" "map" \
     {NULLEV (NPCALL (PYATTR "pop" %0) %1)} \
     {RETURN %0}

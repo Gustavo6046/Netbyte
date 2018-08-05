@@ -34,14 +34,18 @@ For more examples, check the Programs folder.
 
 You will need Python 3 to be able to use Netbyte.
 
+To install, run:
+
+    pip install -U git+https://github.com/Gustavo6046/Netbyte.git
+
 To set up the Standard Library directory, run:
 
     stdlibdir.bat
 
-To compile, run:
+To compile a program, run:
 
-    python compile.py input.nbc [output.nbe]
+    python -m netbyte compile input.nbc [output.nbe]
     
 To execute, run:
 
-    python main.py input.nbe [arguments - see Stdlib/args.nbc or Programs/printfile.nbc]
+    python -m netbyte run input.nbe [arguments - see Stdlib/args.nbc or Programs/printfile.nbc]

@@ -728,13 +728,17 @@ class VersionCheckError(BaseException):
         return self.msg
         
 class Netbyte(object):
-    VERSION = "0.1.5"
+    VERSION = "0.1.6"
 
-    def __init__(self, print_stream=sys.stdout):
+    def __init__(self, print_stream=sys.stdout, script_args=()):
+        script_args = dict(script_args)
+    
         self.variables = {
             "": {
                 "__NETBYTE__": self
-            }
+            },
+            
+            "__PYARGS__": script_args
         }
         self.functions = {}
         self.return_stack = {}
@@ -742,6 +746,12 @@ class Netbyte(object):
         self.pstream = print_stream
         self.last_return = None
         self._labels = {}
+        
+    def __setitem__(self, name, value):
+        self.variables["__PYARGS__"][name] = value
+        
+    def __getitem__(self, name):
+        return self.variables["__PYARGS__"][name]
         
     def _get_str(self, data, pos):
         length = struct.unpack("=I", data[pos: pos + 4])[0]

@@ -1,2 +1,6 @@
 MKFUNC "arg" "args" \
     {RETURN (PYGITM (PYATTR "argv" (PYMODL "sys")) (ADDNUM 2 %0))}
+    
+MKFUNC "pyarg" "args" \
+    {RETURN (GETVAR %0 "__PYARGS__"}
+    

@@ -1,0 +1,10 @@
+"vtrack_version": "0.1.1"
+"software_name": "Netbyte"
+"software_tags": ['programming language', 'language', 'compiler', 'interpreter', 'network', 'python']
+"versions":
+    -   name: "0.1.6.1"
+        changes:
+            - "Adopted the VTrack version description format."
+        
+        todo: {}
+        done: []

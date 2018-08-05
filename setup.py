@@ -1,7 +1,13 @@
 import yaml
 
 from setuptools import setup, find_packages
+from os import path
 
+# read the contents of README file
+this_dir = path.abspath(path.dirname(__file__))
+
+with open(path.join(this_dir, 'README.md'), encoding='utf-8') as f:
+    long_description = f.read()
 
 setup(
     name="Netbyte",
@@ -18,4 +24,7 @@ setup(
     package_data={
         'netbyte': ['*.nbc', '*.nbe', ''],
     },
+    
+    long_description=long_description,
+    long_description_content_type='text/markdown'
 )
